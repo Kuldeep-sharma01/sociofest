@@ -1,3 +1,0 @@
-Module: https://tfhub.dev/google/imagenet/mobilenet_v2_100_224/feature_vector/5
-Download Time: 2026-04-30 18:11:56.541952
-Downloader Hostname: aspire (PID:1064)
