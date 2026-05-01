@@ -4,13 +4,22 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import connectDB from "./config/db.js";
 import path from "path";
+
 import mongoose from "mongoose";
 import User from "./models/User.js";
 import Post from "./models/Post.js";
 import Material from "./models/Material.js";
 import "./config/env.js";
+import winston from 'winston';
 import { startAssignmentCron } from "./cron/assignmentReminders.js";
 import { verifyToken, getTokenFromHeader } from "./utils/jwtUtils.js";
+// 🛠️ Define global logger to prevent ReferenceError crashes in background tasks
+const logger = winston.createLogger({
+  level: process.env.NODE_ENV === "production" ? "warn" : "info",
+  format: winston.format.combine(winston.format.timestamp(), winston.format.simple()),
+  transports: [new winston.transports.Console()]
+});
+
 import { protect } from "./middleware/authMiddleware.js";
 import {
   getFfmpegConfig,
@@ -54,8 +63,8 @@ app.disable("x-powered-by");
 const http = await import('http');const fs = await import('fs');const { createServer } = http;const { promises: fsPromises } = fs;
 const httpServer = createServer(app);
 
-const allowedOrigins = process.env.CLIENT_URL
-  ? process.env.CLIENT_URL.split(",")
+const allowedOrigins = process.env.VITE_CLIENT_URL
+  ? process.env.VITE_CLIENT_URL.split(",")
   : ["http://localhost:5173", "http://127.0.0.1:5173"];
 
 const socketio = await import('socket.io');const { Server } = socketio;

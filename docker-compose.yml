@@ -27,7 +27,7 @@ services:
       - PYTHON_API_URL=http://python-service:5001
       - VOICE_AI_URL=http://voice-ai:8000
       - CUSTOM_AI_URL=http://voice-ai:8000/clone-voice
-      - CLIENT_URL=http://localhost:5173,http://127.0.0.1:5173,http://localhost,http://127.0.0.1
+      - VITE_CLIENT_URL=http://localhost:5173,http://127.0.0.1:5173,http://localhost,http://127.0.0.1
     volumes:
       - backend_uploads:/app/uploads
     depends_on:

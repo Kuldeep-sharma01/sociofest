@@ -115,7 +115,7 @@ export const sendApprovalEmail = async ({ approverEmail, newUser }) => {
  * @param {string} resetToken - Reset token (not hashed)
  */
 export const sendPasswordResetEmail = async (email, resetToken) => {
-  const resetUrl = `${process.env.CLIENT_URL || "http://localhost:5173"}/reset-password/${resetToken}`;
+  const resetUrl = `${process.env.VITE_CLIENT_URL || "http://localhost:5173"}/reset-password/${resetToken}`;
   const html = generatePasswordResetEmailTemplate(resetUrl);
   return sendEmail(email, "Password Reset Request", html);
 };
@@ -126,7 +126,7 @@ export const sendPasswordResetEmail = async (email, resetToken) => {
  * @param {string} verificationToken - Verification token
  */
 export const sendVerificationEmail = async (email, verificationToken) => {
-  const verifyUrl = `${process.env.CLIENT_URL || "http://localhost:5173"}/verify-email/${verificationToken}`;
+  const verifyUrl = `${process.env.VITE_CLIENT_URL || "http://localhost:5173"}/verify-email/${verificationToken}`;
   const html = generateVerificationEmailTemplate(verifyUrl);
   return sendEmail(email, "Verify Your Email", html);
 };

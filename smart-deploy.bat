@@ -17,10 +17,10 @@ if %errorLevel% == 0 (
 )
 
 REM Feature prompts
-set /p COMPILER="Install Code Compiler (vm2 sandbox)? [y/N]: "
+set /p COMPILER="Install Code Compiler (isolated-vm sandbox)? [y/N]: "
 if /i "%COMPILER%"=="y" (
     echo Installing compiler...
-    cd server && npm i vm2 axios-retry && cd ..
+    cd server && npm i isolated-vm axios-retry && cd ..
     echo Compiler installed!
 ) else (
     echo Compiler skipped.

@@ -33,13 +33,13 @@ MONGODB_URI=mongodb://localhost:27017/sociofest # or Atlas
 JWT_SECRET=your-super-secret-jwt-key-64chars-min
 PYTHON_API_URL=http://localhost:5001
 VOICE_AI_URL=http://localhost:8000
-CLIENT_URL=http://localhost:5173,http://yourdomain.com
+VITE_CLIENT_URL=http://localhost:5173,http://yourdomain.com
 UPLOAD_LIMIT_MB=50
 ```
 
 **client/.env**
 ```
-CLIENT_URL=http://localhost:5000/api
+VITE_CLIENT_URL=http://localhost:5000/api
 PYTHON_API_URL=http://localhost:5001
 VITE_VOICE_API_URL=http://localhost:8000
 ```
@@ -90,7 +90,7 @@ docker compose -f docker-compose.full.yml up -d  # Full + Nginx
 ```
 MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/sociofest
 REDIS_URL=redis://default:pass@redis-host:6379
-CLIENT_URL=https://yourdomain.com
+VITE_CLIENT_URL=https://yourdomain.com
 ```
 4. **SSL**: Upload certs to `./ssl/` + nginx.conf
 5. `docker compose -f docker-compose.cloud.yml up -d`
@@ -129,7 +129,7 @@ http://localhost:8000/docs  # Voice AI ✓
 
 ## 5. Domain Setup
 1. A record → server IP
-2. Update CLIENT_URL=yourdomain.com
+2. Update VITE_CLIENT_URL=yourdomain.com
 3. Nginx SSL volume mount
 4. Restart: `docker compose restart`
 

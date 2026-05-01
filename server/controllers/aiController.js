@@ -173,7 +173,8 @@ export const generateContent = async (req, res) => {
 
 export const transcribeAudio = async (req, res) => {
   try {
-    await assertAiAccess(req);
+    const accessCheck = await assertAiAccess(req);
+    if (accessCheck.error) return res.status(accessCheck.status).json({ message: accessCheck.message });
     if (!req.file) return badRequest(res, "Audio file is required");
 
     if (process.env.NODE_ENV === "test" || !process.env.GEMINI_API_KEY) {
@@ -229,7 +230,8 @@ export const transcribeAudio = async (req, res) => {
 
 export const analyzeImage = async (req, res) => {
   try {
-    await assertAiAccess(req);
+    const accessCheck = await assertAiAccess(req);
+    if (accessCheck.error) return res.status(accessCheck.status).json({ message: accessCheck.message });
     if (!req.file) return badRequest(res, "Image file is required");
 
     const { analysis_type } = req.body;
@@ -302,7 +304,8 @@ const normalizeLang = (v) => {
 
 export const translateMedia = async (req, res) => {
   try {
-    await assertAiAccess(req);
+    const accessCheck = await assertAiAccess(req);
+    if (accessCheck.error) return res.status(accessCheck.status).json({ message: accessCheck.message });
     const { text, sourceLanguage, targetLanguage } = req.body;
     if (!text) return badRequest(res, "Text is required for translation");
 
@@ -343,8 +346,17 @@ export const translateMedia = async (req, res) => {
 
 export const textToSpeech = async (req, res) => {
   try {
-    await assertAiAccess(req);
-    const { text, voice, provider, speed, language = 'en' } = req.body;
+    // Skip strict auth for GET requests so browser <audio src="..."> tags work natively
+    if (req.method !== 'GET') {
+      const accessCheck = await assertAiAccess(req);
+      if (accessCheck.error) return res.status(accessCheck.status).json({ message: accessCheck.message });
+    }
+
+    const text = req.body.text || req.query.text;
+    const voice = req.body.voice || req.query.voice;
+    const provider = req.body.provider || req.query.provider;
+    const speed = req.body.speed || req.query.speed;
+    const language = req.body.language || req.query.language || 'en';
 
     // ✅ Validate before calling external API
     const MAX_TTS_LENGTH = 4096;
@@ -437,7 +449,8 @@ const getModelConfig = async () => {
 
 export const getAiRuntimeConfig = async (req, res) => {
   try {
-    await assertAiAccess(req);
+    const accessCheck = await assertAiAccess(req);
+    if (accessCheck.error) return res.status(accessCheck.status).json({ message: accessCheck.message });
     const cfg = await getModelConfig();
     return ok(res, cfg, "AI runtime configuration fetched");
   } catch (error) {
@@ -447,7 +460,8 @@ export const getAiRuntimeConfig = async (req, res) => {
 
 export const upsertAiRuntimeConfig = async (req, res) => {
   try {
-    await assertAiAccess(req);
+    const accessCheck = await assertAiAccess(req);
+    if (accessCheck.error) return res.status(accessCheck.status).json({ message: accessCheck.message });
     if (!["Admin", "HOD"].includes(req.user.role)) {
       return badRequest(res, "Only Admin/HOD can update AI runtime configuration");
     }
@@ -485,7 +499,8 @@ export const upsertAiRuntimeConfig = async (req, res) => {
 
 export const previewSourceEdit = async (req, res) => {
   try {
-    await assertAiAccess(req);
+    const accessCheck = await assertAiAccess(req);
+    if (accessCheck.error) return res.status(accessCheck.status).json({ message: accessCheck.message });
     const { filePath, currentCode, instruction } = req.body || {};
     if (!filePath || !currentCode || !instruction) {
       return badRequest(res, "filePath, currentCode and instruction are required");
@@ -663,7 +678,8 @@ perplexity: async () => [
 
 export const proxyChat = async (req, res) => {
   try {
-    await assertAiAccess(req);
+    const accessCheck = await assertAiAccess(req);
+    if (accessCheck.error) return res.status(accessCheck.status).json({ message: accessCheck.message });
     const {
       provider,
       selectedModel,
@@ -984,7 +1000,8 @@ export const proxyChat = async (req, res) => {
 
 export const proxyMedia = async (req, res) => {
   try {
-    await assertAiAccess(req);
+    const accessCheck = await assertAiAccess(req);
+    if (accessCheck.error) return res.status(accessCheck.status).json({ message: accessCheck.message });
     const {
       provider,
       prompt,

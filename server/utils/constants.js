@@ -6,10 +6,10 @@ const isLocal =
 
 const apiUrl = isLocal
   ? `http://${window.location.hostname}:5000`
-  : import.meta.env.CLIENT_URL || import.meta.env.CLIENT_URL;
+  : import.meta.env.VITE_CLIENT_URL || import.meta.env.VITE_CLIENT_URL;
 
 export const API_URL = apiUrl + "/api";
-export const API_URL = import.meta.env.CLIENT_URL || "";
+export const API_URL = import.meta.env.VITE_CLIENT_URL || "";
 
 const pythonApiUrl = isLocal
   ? `http://${window.location.hostname}:5001`

@@ -5,7 +5,7 @@ services:
     build:
       context: ./client
       args:
-        - CLIENT_URL=/api
+        - VITE_CLIENT_URL=/api
         - PYTHON_API_URL=/python-api
         - VITE_VOICE_API_URL=/voice-api
         - VITE_SD_API_URL=/sd-api
@@ -32,7 +32,7 @@ services:
       - NODE_ENV=production
       - PYTHON_API_URL=http://python-service:5001
       - VOICE_AI_URL=http://voice-ai:8000
-      - CLIENT_URL=${CLIENT_URL} # Cloud domain
+      - VITE_CLIENT_URL=${VITE_CLIENT_URL} # Cloud domain
     volumes:
       - backend_uploads:/app/uploads
     restart: unless-stopped

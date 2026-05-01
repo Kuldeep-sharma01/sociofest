@@ -554,7 +554,7 @@ const Activities = () => {
       setNotifications((prev) => prev.filter((n) => n._id !== id));
       
       if (notif?.isSystem) {
-        const API_URL = import.meta.env.CLIENT_URL || "http://localhost:5000/api";
+        const API_URL = import.meta.env.VITE_CLIENT_URL || "http://localhost:5000/api";
         fetch(`${API_URL}/notifications/${id}`, {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` }
