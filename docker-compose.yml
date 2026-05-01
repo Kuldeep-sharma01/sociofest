@@ -1,0 +1,71 @@
+version: "3.8"
+
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: sociofest-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: [ "CMD-SHELL", "mongosh --eval 'db.adminCommand(\"ping\")' >/dev/null 2>&1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./server
+    container_name: sociofest-backend
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./server/.env
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/smart-attendance
+      - NODE_ENV=production
+      - PYTHON_API_URL=http://python-service:5001
+      - VOICE_AI_URL=http://voice-ai:8000
+      - CUSTOM_AI_URL=http://voice-ai:8000/clone-voice
+      - CLIENT_URL=http://localhost:5173,http://127.0.0.1:5173,http://localhost,http://127.0.0.1
+    volumes:
+      - backend_uploads:/app/uploads
+    depends_on:
+      - mongodb
+      - python-service
+      - voice-ai
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:5000/health >/dev/null || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  python-service:
+    build: ./server/python_modules
+    container_name: sociofest-python
+    ports:
+      - "5001:5001"
+    env_file:
+      - ./server/python_modules/.env
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/smart-attendance
+    depends_on:
+      - mongodb
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:5001/health >/dev/null || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  voice-ai:
+    build:
+      context: ./server/python_modules
+      dockerfile: Dockerfile.voice
+    container_name: sociofest-voice-ai
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  backend_uploads:

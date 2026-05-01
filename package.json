@@ -1,0 +1,42 @@
+{
+  "name": "practice",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "install-all": "npm install && npm install --prefix client && npm install --prefix server",
+    "validate-env": "node ./scripts/validate-env.mjs",
+    "preflight": "node ./scripts/preflight.mjs",
+    "smoke:services": "node ./scripts/smoke-services.mjs",
+    "verify:runtime": "node ./scripts/runtime-readiness.mjs",
+    "verify": "npm run preflight && npm run smoke:services",
+    "dev": "npm run preflight && concurrently \"npm run server\" \"npm run wait-server && npm run client\" \"npm run voice-ai\"",
+    "server": "npx kill-port 5000 && npm run dev --prefix server",
+    "wait-server": "npx wait-on http://localhost:5000 --timeout 90000",
+    "client": "npm run dev --prefix client",
+    "wait-face-ai": "npx wait-on http://localhost:5001/health --timeout 90000",
+    "wait-voice-ai": "npx wait-on http://localhost:8000/docs --timeout 90000",
+    "wait-client": "npx wait-on http://localhost:5173 --timeout 90000",
+    "install-python": "node ./scripts/python-venv.mjs install",
+    "voice-ai": "node ./scripts/python-venv.mjs voice",
+    "face-ai": "node ./scripts/python-venv.mjs face",
+    "full-dev": "concurrently \"npm run dev\" \"npm run face-ai\"",
+    "infra:up": "docker compose up -d mongodb",
+    "infra:down": "docker compose down",
+    "up": "npm run install-all && npm run preflight && npm run full-dev",
+    "up:docker": "npm run infra:up && npm run full-dev",
+    "health:all": "npm run wait-server && npm run wait-face-ai && npm run wait-voice-ai && npm run wait-client",
+    "start-all": "npm pkg exec concurrently \"npm run full-dev\" \"cmd /c start cmd /k cd stable-diffusion-webui \\\\& webui-user.bat\" \"docker compose up mongodb -d\"",
+    "start-all:unix": "concurrently \"npm run full-dev\" \"cd stable-diffusion-webui && ./webui.sh\" \"docker compose up mongodb -d\"",
+    "deploy": "docker compose -f docker-compose.full.yml up -d --build",
+    "deploy:gpu": "docker compose -f docker-compose.full.yml --profile gpu up -d --build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "wait-on": "^7.0.1"
+  },
+  "dependencies": {
+    "prop-types": "^15.8.1",
+    "winston": "^3.19.0"
+  }
+}

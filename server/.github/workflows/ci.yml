@@ -1,0 +1,52 @@
+name: Node.js CI
+
+# Trigger the workflow on push or pull request to the main branch
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # Set up a MongoDB service container if your tests require a real database connection
+    services:
+      mongodb:
+        image: mongo:latest
+        ports:
+          - 27017:27017
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x] # Test across multiple Node versions
+
+    steps:
+    # 1. Checkout the repository code
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # 2. Set up Node.js
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm' # Automatically caches node_modules for faster builds
+        cache-dependency-path: './server/package-lock.json'
+
+    # 3. Install dependencies in the server directory
+    - name: Install dependencies
+      working-directory: ./server
+      run: npm ci
+
+    # 4. Run the Jest tests
+    - name: Run Jest Tests
+      working-directory: ./server
+      run: npm test
+      env:
+        # Provide dummy environment variables needed by your tests
+        PORT: 5000
+        MONGODB_URI: mongodb://localhost:27017/sociofest_test
+        JWT_SECRET: super_secret_test_key
+        # Add any other variables your tests might depend on here

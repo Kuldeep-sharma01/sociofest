@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  judge0-mono:
+    image: judge0/judge0:mono
+    container_name: sociofest-compiler-test
+    ports:
+      - "2358:2358"
+    environment:
+      - JUDGE0_DISABLE=true  # Enable API
+      - JUDGE0_LOG_LEVEL=info
+    volumes:
+      - judge0-data:/var/lib/docker/volumes/judge0/_data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2358/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  judge0-data:
+    driver: local
+
+# Usage:
+# docker compose -f server/docker-compose.compiler-test.yml up -d
+# Test: curl "http://localhost:2358/languages" | jq '.[] | {id, name}'
+# Backend config: Use http://host.docker.internal:2358 instead of RapidAPI
+

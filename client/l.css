@@ -1,0 +1,140 @@
+/* HTML: <div class="loader"></div> */
+.loader {
+  --s: 25px;
+  --g: 5px;
+
+  width: calc(3 * (1.353 * var(--s) + var(--g)));
+  display: grid;
+  justify-items: end;
+  aspect-ratio: 3;
+  overflow: hidden;
+  --_m: linear-gradient(90deg, #0000, #000 15px calc(100% - 15px), #0000);
+  -webkit-mask: var(--_m);
+  mask: var(--_m);
+}
+.loader:before {
+  content: "";
+  width: 200%;
+  background:
+    linear-gradient(90deg, #ff1818 50%, #0000 0),
+    conic-gradient(
+      from -90deg at var(--s) calc(0.353 * var(--s)),
+      #fff 135deg,
+      #666 0 270deg,
+      #aaa 0
+    );
+  background-blend-mode: multiply;
+  --_m:
+    linear-gradient(
+      to bottom right,
+      #0000 calc(0.25 * var(--s)),
+      #000 0 calc(100% - calc(0.25 * var(--s)) - 1.414 * var(--g)),
+      #0000 0
+    ),
+    conic-gradient(
+      from -90deg at right var(--g) bottom var(--g),
+      #000 90deg,
+      #0000 0
+    );
+  -webkit-mask: var(--_m);
+  mask: var(--_m);
+  background-size:
+    calc(100% / 3) 100%,
+    calc(100% / 6) 100%;
+  -webkit-mask-size: calc(100% / 6) 100%;
+  mask-size: calc(100% / 6) 100%;
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+  animation: l10 1s infinite linear;
+}
+@keyframes l10 {
+  to {
+    transform: translate(calc(100% / 3));
+  }
+}
+
+/* HTML: <div class="loader"></div> */
+.loader {
+  width: 60px;
+  height: 60px;
+  display: grid;
+}
+.loader:before,
+.loader:after {
+  content: "";
+  grid-area: 1/1;
+  background: #514b82;
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% 100%,
+    75% 25%,
+    0 0,
+    0 100%,
+    100% 100%,
+    25% 75%,
+    0 0
+  );
+  animation: l20 1.5s infinite linear;
+}
+.loader:after {
+  clip-path: polygon(0 0, 76% 24%, 100% 100%, 24% 76%);
+  --s: 0;
+}
+@keyframes l20 {
+  0% {
+    transform: perspective(100px) rotate3d(1, var(--s, 1), 0, 0);
+  }
+  25% {
+    transform: perspective(100px) rotate3d(1, var(--s, 1), 0, -90deg);
+  }
+  25.01% {
+    transform: perspective(100px) rotate3d(1, var(--s, 1), 0, -90deg);
+  }
+  40%,
+  60% {
+    transform: perspective(100px) rotate3d(1, var(--s, 1), 0, -180deg);
+  }
+  75% {
+    transform: perspective(100px) rotate3d(1, var(--s, 1), 0, -270deg);
+  }
+  75.01% {
+    transform: perspective(100px) rotate3d(1, var(--s, 1), 0, -270deg);
+  }
+  90%,
+  100% {
+    transform: perspective(100px) rotate3d(1, var(--s, 1), 0, -360deg);
+  }
+}
+
+/* HTML: <div class="loader"></div> */
+.loader {
+  width: 50px;
+  aspect-ratio: 1;
+  display: grid;
+}
+.loader::before,
+.loader::after {
+  content: "";
+  grid-area: 1/1;
+  --c: no-repeat radial-gradient(farthest-side, #25b09b 92%, #0000);
+  background:
+    var(--c) 50% 0,
+    var(--c) 50% 100%,
+    var(--c) 100% 50%,
+    var(--c) 0 50%;
+  background-size: 12px 12px;
+  animation: l12 1s infinite;
+}
+.loader::before {
+  margin: 4px;
+  filter: hue-rotate(45deg);
+  background-size: 8px 8px;
+  animation-timing-function: linear;
+}
+
+@keyframes l12 {
+  100% {
+    transform: rotate(0.5turn);
+  }
+}

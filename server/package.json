@@ -1,0 +1,48 @@
+{
+  "name": "sociofest-server",
+  "version": "1.0.0",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon --ignore uploads/ server.js",
+    "lint": "eslint . --ignore-pattern \"python_modules/**\" --ignore-pattern \"**/venv/**\"",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "axios": "^1.7.4",
+    "axios-retry": "^4.5.0",
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dompurify": "^3.1.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "express-rate-limit": "^8.3.1",
+    "express-validator": "^7.2.1",
+    "file-type": "^22.0.1",
+    "firebase-admin": "^13.7.0",
+    "get-stream": "^8.0.1",
+    "helmet": "^8.1.0",
+    "ioredis": "^5.10.1",
+    "ipaddr.js": "^2.3.0",
+    "jsdom": "^24.1.1",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.7.0",
+    "morgan": "^1.10.0",
+    "multer": "^2.0.2",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^8.0.3",
+    "pdfkit": "^0.15.1",
+    "socket.io": "^4.8.3",
+    "vm2": "^3.10.5",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "eslint": "^9.12.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.7",
+    "supertest": "^6.3.3"
+  }
+}

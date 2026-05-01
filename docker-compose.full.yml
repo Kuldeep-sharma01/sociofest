@@ -1,0 +1,125 @@
+version: "3.8"
+
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: sociofest-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  backend:
+    build: ./server
+    container_name: sociofest-backend
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./server/.env
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/smart-attendance
+      - NODE_ENV=production
+      - PYTHON_API_URL=http://python-service:5001
+      - VOICE_AI_URL=http://voice-ai:8000
+      - CUSTOM_AI_URL=http://voice-ai:8000/clone-voice
+      - CLIENT_URL=http://localhost,http://127.0.0.1
+    volumes:
+      - backend_uploads:/app/uploads
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      python-service:
+        condition: service_healthy
+      voice-ai:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  python-service:
+    build: ./server/python_modules
+    container_name: sociofest-python
+    ports:
+      - "5001:5001"
+    env_file:
+      - ./server/python_modules/.env
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/smart-attendance
+    volumes:
+      - python_models:/app/model_cache
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5001/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  voice-ai:
+    build:
+      context: ./server/python_modules
+      dockerfile: Dockerfile.voice
+    container_name: sociofest-voice-ai
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: ./client
+      args:
+        - CLIENT_URL=/api
+        - PYTHON_API_URL=/python-api
+        - VITE_VOICE_API_URL=/voice-api
+        - VITE_SD_API_URL=/sd-api
+    container_name: sociofest-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      backend:
+        condition: service_healthy
+      python-service:
+        condition: service_healthy
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: unless-stopped
+
+  sd-webui:
+    image: ghcr.io/abdulrhmn/sd-webui:latest
+    container_name: sociofest-sd
+    profiles:
+      - gpu
+    ports:
+      - "7860:7860"
+    volumes:
+      - sd_models:/data/models
+      - sd_outputs:/data/outputs
+    environment:
+      - CLI_ARGS=--listen --enable-insecure-extension-access --api
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  backend_uploads:
+  python_models:
+  sd_models:
+  sd_outputs:

@@ -1,0 +1,9 @@
+__pycache__
+*.pyc
+*.pyo
+venv
+.env
+generated_certificates/*
+generated_images/*
+media_uploads/*
+stable_diffusion_models/*

@@ -1,0 +1,39 @@
+{
+  "image_generation": {
+    "enabled": true,
+    "device": "auto",
+    "models": {
+      "sd-1-5": {
+        "enabled": true,
+        "huggingface_id": "runwayml/stable-diffusion-v1-5",
+        "download_on_startup": false,
+        "cache_dir": "stable_diffusion_models"
+      },
+      "sd-2-1": {
+        "enabled": false,
+        "huggingface_id": "stabilityai/stable-diffusion-2-1",
+        "download_on_startup": false,
+        "cache_dir": "stable_diffusion_models"
+      }
+    },
+    "generation": {
+      "default_width": 512,
+      "default_height": 512,
+      "default_steps": 30,
+      "max_steps": 50,
+      "default_guidance_scale": 7.5,
+      "max_queue_size": 10
+    },
+    "output": {
+      "save_to_disk": true,
+      "output_dir": "generated_images",
+      "quality": 95
+    },
+    "google_drive": {
+      "enabled": true,
+      "credentials_file_path": ".env.secrets/google-drive-credentials.json",
+      "auto_download_models": false,
+      "model_storage_folder_id": null
+    }
+  }
+}
