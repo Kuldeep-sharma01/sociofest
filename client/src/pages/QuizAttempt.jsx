@@ -176,6 +176,7 @@ const QuizAttempt = () => {
     try {
       // Build a compact map: originalIndex → selected option
       const submittedAnswers = presentedQuestions.map((q) => ({
+        questionId: q._id,
         questionIndex: q.originalIndex,
         answer: answers[q.originalIndex],
       }));

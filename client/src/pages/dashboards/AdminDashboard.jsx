@@ -12,6 +12,11 @@ import {
   Edit,
   Sparkles,
   Camera,
+  MapPin,
+  Phone,
+  Calendar,
+  Award,
+  Briefcase,
 } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { updateUser as updateAuthUser } from "@/redux/authSlice";
@@ -194,7 +199,47 @@ const AdminDashboard = ({ userId, isViewingOther, targetUser }) => {
             value={activeUserObj?.email}
             colorClass="text-inherit opacity-80"
           />
+          {activeUserObj?.location && (
+            <InfoItem
+              icon={MapPin}
+              label="Location"
+              value={activeUserObj.location}
+              colorClass="text-inherit opacity-80"
+            />
+          )}
+          {activeUserObj?.contactNumber && (
+            <InfoItem
+              icon={Phone}
+              label="Contact"
+              value={activeUserObj.contactNumber}
+              colorClass="text-inherit opacity-80"
+            />
+          )}
+          {activeUserObj?.dob && (
+            <InfoItem
+              icon={Calendar}
+              label="Birthday"
+              value={new Date(activeUserObj.dob).toLocaleDateString()}
+              colorClass="text-inherit opacity-80"
+            />
+          )}
         </div>
+        {activeUserObj?.bio && (
+          <div className="mt-4 pt-4 border-t border-inherit/30">
+            <h4 className="text-sm font-bold opacity-80 mb-1 text-inherit">Bio</h4>
+            <p className="text-inherit font-medium">{activeUserObj.bio}</p>
+          </div>
+        )}
+        {activeUserObj?.skills?.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-inherit/30">
+            <h4 className="text-sm font-bold opacity-80 mb-2 text-inherit">Skills</h4>
+            <div className="flex flex-wrap gap-2">
+              {activeUserObj.skills.map((skill, i) => (
+                <span key={i} className="px-3 py-1 bg-black/5 dark:bg-white/5 border border-inherit/30 text-inherit text-sm font-medium rounded-full">{skill}</span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Statistics Overview */}

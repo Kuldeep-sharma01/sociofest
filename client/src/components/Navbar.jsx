@@ -6,11 +6,8 @@ import {
   X,
   LogOut,
   Search,
-  Moon,
-  Sun,
   Bot,
   Mic,
-  Palette,
   MonitorPlay,
   FileText,
   Bell,
@@ -20,14 +17,18 @@ import {
   Check,
   Settings,
   UserCircle,
+  Camera,
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useSelector, useDispatch } from "react-redux";
 import { logout } from "@/redux/authSlice";
 import { logoutUser } from "@/services/userService";
+import { getAllQuizzes } from "@/services/quizService";
+import { getRoleProfile } from "@/utils/roleUtils";
 import { useSocket } from "@/context/SocketContext";
 import { useTheme, THEMES } from "@/context/ThemeContext";
 import { getUnreadCount } from "@/services/chatService";
+import { API_URL } from "@/config/constants";
 import { useMicVolume } from "../hooks/useMicVolume";
 import FullscreenMediaModal from "./ui/FullscreenMediaModal";
 import { globalSearch } from "@/services/searchService";
@@ -36,6 +37,8 @@ import {
   getOptionClasses,
   getPrimaryButtonClasses,
   getCardThemeClasses,
+  getGlassyClasses,
+  get3DCardClasses,
 } from "@/utils/themeUtils";
 import UserInfo from "@/components/ui/UserInfo";
 import UniversalBadge from "@/components/ui/UniversalBadge";
@@ -45,15 +48,13 @@ const NavLink = ({ to, children, title, onClick }) => (
   <Link
     to={to}
     title={title}
-    className="flex items-center justify-center gap-1.5
+    className="no-3d flex items-center justify-center gap-1.5
       shrink-0
       px-3 py-2 md:px-4
       text-sm md:text-base
       rounded-xl
       font-semibold text-inherit hover:bg-black/5 dark:hover:bg-white/5 opacity-90 hover:opacity-100
       transition-all duration-300 ease-out
-      hover:-translate-y-0.5 hover:shadow-md
-      active:scale-95
       focus:outline-none
       hover:no-underline
     "
@@ -66,9 +67,8 @@ const Navbar = ({ setSidebar, open }) => {
   const user = useSelector((state) => state.auth.user);
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const location = useLocation();
   const socket = useSocket();
-  const { isDark, toggleTheme, appTheme, setAppTheme } = useTheme();
+  const { isDark, appTheme, is3DMode } = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -81,7 +81,10 @@ const Navbar = ({ setSidebar, open }) => {
     notices: 0,
     activities: 0,
   });
-  
+
+  // Upcoming Quizzes Alert (under 24h)
+  const [upcomingQuizzes, setUpcomingQuizzes] = useState(0);
+
   // Quick Search Dropdown States
   const [quickResults, setQuickResults] = useState(null);
   const [showQuickResults, setShowQuickResults] = useState(false);
@@ -107,7 +110,7 @@ const Navbar = ({ setSidebar, open }) => {
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
-        } catch (e) {}
+        } catch (e) { }
       }
     };
   }, []);
@@ -127,7 +130,7 @@ const Navbar = ({ setSidebar, open }) => {
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (desktopSearchRef.current && !desktopSearchRef.current.contains(e.target) &&
-          mobileSearchRef.current && !mobileSearchRef.current.contains(e.target)) {
+        mobileSearchRef.current && !mobileSearchRef.current.contains(e.target)) {
         setShowQuickResults(false);
       }
     };
@@ -149,7 +152,7 @@ const Navbar = ({ setSidebar, open }) => {
         const res = await globalSearch(searchQuery, true);
         setQuickResults(res);
         setShowQuickResults(true);
-      } catch (error) {}
+      } catch (error) { }
     }, 300);
     return () => clearTimeout(delayFn);
   }, [searchQuery, user]);
@@ -158,6 +161,41 @@ const Navbar = ({ setSidebar, open }) => {
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+
+  // Fetch upcoming quizzes globally for students (under 24 hours)
+  useEffect(() => {
+    if (user?.role !== "Student") return;
+    const fetchUpcoming = async () => {
+      try {
+        const studentProfile = await getRoleProfile(user.role, user._id);
+        const studentSubjects = studentProfile?.subjects;
+        if (!studentSubjects || !Array.isArray(studentSubjects)) return;
+
+        const quizzesRes = await getAllQuizzes();
+        const allQuizzes = Array.isArray(quizzesRes) ? quizzesRes : quizzesRes?.quizzes || [];
+        const studentDeptId = studentProfile.user?.department?._id || studentProfile.user?.department;
+        const subjectIds = studentSubjects.map((s) => String(s._id));
+
+        const upcomingCount = allQuizzes.filter((quiz) => {
+          const quizDeptId = quiz.department?._id || quiz.department;
+          if (String(studentDeptId) !== String(quizDeptId)) return false;
+          if (!subjectIds.includes(String(quiz.subject?._id || quiz.subject))) return false;
+          if (!quiz.isActive || !quiz.startDate) return false;
+
+          const now = new Date();
+          const start = new Date(quiz.startDate);
+          const diffHours = (start - now) / (1000 * 60 * 60);
+
+          // Only count if it's starting within the next 24 hours
+          return diffHours > 0 && diffHours <= 24;
+        }).length;
+
+        setUpcomingQuizzes(upcomingCount);
+      } catch (err) { }
+    };
+
+    fetchUpcoming();
+  }, [user, location.pathname]); // Re-check periodically when navigating
 
   // Listen for custom global toast events from any component
   useEffect(() => {
@@ -199,16 +237,32 @@ const Navbar = ({ setSidebar, open }) => {
       hasWelcomed.current = true;
     }
 
-    const fetchUnreadCount = () => {
-      getUnreadCount()
-        .then((data) => {
-          setUnreadCounts((prev) => ({ ...prev, chat: data.count || 0 }));
-        })
-        .catch((err) =>
-          console.error("Failed to load sidebar unread count", err),
-        );
+    const fetchUnreadCount = async () => {
+      try {
+        const chatData = await getUnreadCount();
+        const notifsRes = await fetch(`${API_URL}/notifications`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+        });
+        
+        let unreadNotifs = 0;
+        if (notifsRes.ok) {
+          const resData = await notifsRes.json();
+          const allNotifs = Array.isArray(resData) ? resData : (resData.notifications || resData.data || []);
+          const dismissed = JSON.parse(localStorage.getItem(`dismissed_notifs_${user._id}`)) || [];
+          unreadNotifs = allNotifs.filter(n => !n.isRead && !dismissed.includes(n._id)).length;
+        }
+
+        setUnreadCounts({
+          chat: chatData.count || 0,
+          activities: unreadNotifs,
+          notices: 0 // Notices are currently transient in sidebar too
+        });
+      } catch (err) {
+        console.error("Failed to load navbar unread count", err);
+      }
     };
     fetchUnreadCount();
+
     window.addEventListener("messagesRead", fetchUnreadCount);
 
     // Request browser notification permission
@@ -277,8 +331,28 @@ const Navbar = ({ setSidebar, open }) => {
       }, 2000);
     };
 
+    const handleNewActivity = () => {
+      if (!locationRef.current.startsWith("/activities")) {
+        setUnreadCounts((prev) => ({
+          ...prev,
+          activities: (prev.activities || 0) + 1,
+        }));
+      }
+    };
+
+    const handleNewNotice = () => {
+      if (locationRef.current !== "/notice-board") {
+        setUnreadCounts((prev) => ({
+          ...prev,
+          notices: (prev.notices || 0) + 1,
+        }));
+      }
+    };
+
     socket.on("message received", handleMessageReceived);
     socket.on("notification", handleNotification);
+    socket.on("new activity", handleNewActivity);
+    socket.on("new notice", handleNewNotice);
     socket.on("remove activity", handleRemoveActivity);
     socket.on("remove notice", handleRemoveNotice);
     socket.on("account blocked", handleAccountBlocked);
@@ -287,17 +361,33 @@ const Navbar = ({ setSidebar, open }) => {
       window.removeEventListener("messagesRead", fetchUnreadCount);
       socket.off("message received", handleMessageReceived);
       socket.off("notification", handleNotification);
+      socket.off("new activity", handleNewActivity);
+      socket.off("new notice", handleNewNotice);
       socket.off("remove activity", handleRemoveActivity);
       socket.off("remove notice", handleRemoveNotice);
       socket.off("account blocked", handleAccountBlocked);
     };
+
   }, [user?._id, socket]);
+
+  // Reset badge counts when user navigates to the relevant page
+  useEffect(() => {
+    if (location.pathname.startsWith("/chat")) {
+      setUnreadCounts((prev) => ({ ...prev, chat: 0 }));
+    }
+    if (location.pathname.startsWith("/activities")) {
+      setUnreadCounts((prev) => ({ ...prev, activities: 0 }));
+    }
+    if (location.pathname === "/notice-board") {
+      setUnreadCounts((prev) => ({ ...prev, notices: 0 }));
+    }
+  }, [location.pathname]);
 
   const toggleVoiceSearch = () => {
     if (isListening && recognitionRef.current) {
       try {
         recognitionRef.current.stop();
-      } catch (e) {}
+      } catch (e) { }
       setIsListening(false);
       return;
     }
@@ -413,7 +503,7 @@ const Navbar = ({ setSidebar, open }) => {
   const handleLogoutClick = () => {
     logoutUser();
     dispatch(logout());
-    navigate("/login");
+    navigate("/");
   };
 
   const renderQuickResults = () => {
@@ -500,7 +590,7 @@ const Navbar = ({ setSidebar, open }) => {
 
   return (
     <nav
-      className={`relative w-full z-40 transition-colors shadow-sm border-b border-inherit/10 ${getNavbarThemeClasses(appTheme)}`}
+      className={`no-3d relative w-full z-40 transition-all duration-500 shadow-xl border-b border-white/10 ${getGlassyClasses(isDark)} ${getNavbarThemeClasses(appTheme)}`}
     >
       {isSearchOpen &&
         createPortal(
@@ -588,7 +678,7 @@ const Navbar = ({ setSidebar, open }) => {
                 className="w-full bg-transparent border-none focus:ring-0 text-inherit placeholder-current opacity-80 h-16 text-base"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                onFocus={() => { if(quickResults) setShowQuickResults(true); }}
+                onFocus={() => { if (quickResults) setShowQuickResults(true); }}
               />
               {showQuickResults && renderQuickResults()}
             </form>
@@ -628,20 +718,20 @@ const Navbar = ({ setSidebar, open }) => {
                 {(unreadCounts.chat > 0 ||
                   unreadCounts.notices > 0 ||
                   unreadCounts.activities > 0) && (
-                  <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
-                )}
+                    <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
+                  )}
               </button>
             )}
 
             <Link
-              to="/home"
+              to="/"
               className="flex items-center gap-1 group hover:no-underline"
             >
               <img
-              src={logo}
+                src={logo}
                 alt="SocioFest Logo"
                 referrerPolicy="no-referrer"
-                className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg object-contain transition-transform duration-300 group-hover:scale-105"
+                className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg object-contain transition-all duration-500 group-hover:scale-110 ${is3DMode ? "floating" : ""}`}
               />
               <span
                 className="
@@ -736,7 +826,7 @@ const Navbar = ({ setSidebar, open }) => {
                   placeholder="Search people, events..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  onFocus={() => { if(quickResults) setShowQuickResults(true); }}
+                  onFocus={() => { if (quickResults) setShowQuickResults(true); }}
                   className="w-full bg-black/5 dark:bg-white/5 border-transparent focus:bg-black/10 dark:focus:bg-white/10 text-inherit focus:ring-2 focus:ring-current rounded-full py-2 pl-10 pr-10 text-sm transition-all shadow-sm outline-none placeholder-current placeholder-opacity-60"
                 />
                 <button
@@ -782,9 +872,9 @@ const Navbar = ({ setSidebar, open }) => {
                       </p>
                     )}
                   </div>
-                  <NavLink to="/feed" title="feed">
+                  <NavLink to="/network" title="Network">
                     <Users className="w-5 h-5 md:w-4 md:h-4" />
-                    <span className="hidden lg:inline">Social Medias</span>
+                    <span className="hidden lg:inline">Network</span>
                   </NavLink>
                   <div className="flex relative">
                     <NavLink to="/chat" title="Chat">
@@ -808,6 +898,14 @@ const Navbar = ({ setSidebar, open }) => {
 
           {/* RIGHT SECTION (fixed) */}
           <div className="flex items-center  shrink-0 gap-2" title="Profile">
+            {/* Upcoming Quizzes 24h Countdown Badge */}
+            {upcomingQuizzes > 0 && (
+              <Link to="/activities" className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500 border border-red-600 text-white rounded-full transition-all hover:bg-red-600 text-xs font-bold shadow-lg animate-pulse hover:animate-none">
+                <FileText className="w-3.5 h-3.5" />
+                <span>{upcomingQuizzes} Exam{upcomingQuizzes > 1 ? 's' : ''} soon</span>
+              </Link>
+            )}
+
             {/* Mobile Search Toggle */}
             {user && (
               <button
@@ -819,41 +917,6 @@ const Navbar = ({ setSidebar, open }) => {
               </button>
             )}
 
-            {/* Global Theme Controls (Always Visible) */}
-            <button
-              onClick={toggleTheme}
-              className="p-1.5 sm:p-2 rounded-full border border-inherit bg-black/5 dark:bg-white/5 text-inherit hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
-              title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
-            >
-              {isDark ? (
-                <Sun className="w-4 h-4 sm:w-5 sm:h-5" />
-              ) : (
-                <Moon className="w-4 h-4 sm:w-5 sm:h-5" />
-              )}
-            </button>
-
-            <div className="relative group flex items-center justify-center">
-              <button
-                className="p-1.5 sm:p-2 rounded-full border border-inherit bg-black/5 dark:bg-white/5 text-inherit hover:bg-black/10 dark:hover:bg-white/10 transition-all active:scale-95 flex items-center gap-1"
-                title="Change Theme"
-              >
-                <Palette className="w-4 h-4 sm:w-5 sm:h-5" />
-              </button>
-              <div className="absolute top-full right-0 mt-2 w-48 bg-black/90 dark:bg-white/10 backdrop-blur-xl rounded-xl shadow-2xl border border-inherit/30 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 origin-top-right scale-95 group-hover:scale-100 z-50 overflow-hidden flex flex-col p-1">
-                <div className="px-3 py-2 text-xs font-bold text-white dark:text-inherit opacity-60 uppercase tracking-wider border-b border-inherit/30 mb-1">
-                  App Theme
-                </div>
-                {THEMES.map((theme) => (
-                  <button
-                    key={theme.id}
-                    onClick={() => setAppTheme(theme.id)}
-                    className={`text-left px-3 py-2 text-sm rounded-lg transition-colors ${appTheme === theme.id ? getPrimaryButtonClasses(appTheme) : "text-white dark:text-inherit opacity-80 hover:opacity-100 hover:bg-white/10"}`}
-                  >
-                    {theme.name}
-                  </button>
-                ))}
-              </div>
-            </div>
 
             {user ? (
               <>
@@ -876,6 +939,19 @@ const Navbar = ({ setSidebar, open }) => {
                   </Link>
 
                   <div className="absolute top-full right-0 mt-2 w-56 bg-black/90 dark:bg-white/10 backdrop-blur-xl rounded-xl shadow-2xl border border-inherit/30 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 origin-top-right scale-95 group-hover:scale-100 z-50 overflow-hidden flex flex-col p-1">
+                    <div className="px-3 py-2 text-[10px] font-bold text-white dark:text-inherit opacity-50 uppercase tracking-widest border-b border-inherit/30 mb-1">
+                      Account
+                    </div>
+                    
+                    {!user.faceEncodingVector && (
+                      <Link
+                        to="/dashboard/mark-attendance"
+                        className="flex items-center gap-3 px-3 py-2 text-sm rounded-lg bg-blue-500 text-white font-bold hover:bg-blue-600 transition-all mx-1 my-1"
+                      >
+                        <Camera className="w-4 h-4" /> Setup Face ID
+                      </Link>
+                    )}
+
                     <Link
                       to={`/profile/${user._id}`}
                       className="flex items-center gap-3 px-3 py-2 text-sm rounded-lg text-white dark:text-inherit opacity-90 hover:opacity-100 hover:bg-white/10 transition-colors"
@@ -928,11 +1004,10 @@ const Navbar = ({ setSidebar, open }) => {
       {toastMsg &&
         createPortal(
           <div
-            className={`fixed bottom-6 right-6 z-[9999] px-5 py-3 rounded-xl shadow-2xl border flex items-center gap-3 animate-in slide-in-from-bottom-5 fade-in duration-300 ${
-              typeof toastMsg === "object" && toastMsg.variant === "error"
+            className={`fixed bottom-6 right-6 z-[9999] px-5 py-3 rounded-xl shadow-2xl border flex items-center gap-3 animate-in slide-in-from-bottom-5 fade-in duration-300 ${typeof toastMsg === "object" && toastMsg.variant === "error"
                 ? "bg-red-500 text-white border-red-600"
                 : `${getCardThemeClasses(appTheme)} border-inherit/20`
-            }`}
+              }`}
           >
             <span className="relative flex h-3 w-3">
               <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${typeof toastMsg === "object" && toastMsg.variant === "error" ? "bg-white" : "bg-current"}`}></span>

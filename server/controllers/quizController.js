@@ -7,7 +7,6 @@ import Certificate from "../models/Certificate.js"; // Import the Certificate mo
 import Material from "../models/Material.js";
 import Department from "../models/Department.js";
 import Subject from "../models/Subject.js";
-import Student from "../models/Student.js";
 import QuizSubmission from "../models/QuizSubmission.js";
 import Notification from "../models/Notification.js";
 import { ok, created, badRequest, notFound, forbidden, unprocessableEntity, serverError } from '../utils/index.js';
@@ -78,12 +77,25 @@ export const flagQuizAttempt = async (req, res) => {
       return badRequest(res, `Invalid violation type. Must be one of: ${VALID_VIOLATION_TYPES.join(', ')}.`);
     }
 
-    const quiz = await Quiz.findById(id).select('isActive author');
+    const quiz = await Quiz.findById(id).select('isActive author title');
     if (!quiz) {
       return notFound(res, "Quiz not found.");
     }
     if (!quiz.isActive) {
       return badRequest(res, "Quiz is not currently active.");
+    }
+
+    // Rate-limit flags per student per quiz BEFORE writing to prevent log flooding
+    const oneMinuteAgo = new Date(Date.now() - 60_000);
+    const recentFlagResult = await Quiz.aggregate([
+      { $match: { _id: new mongoose.Types.ObjectId(id) } },
+      { $unwind: "$cheatLogs" },
+      { $match: { "cheatLogs.student": studentId, "cheatLogs.timestamp": { $gte: oneMinuteAgo } } },
+      { $count: "total" },
+    ]);
+    const recentFlags = recentFlagResult[0]?.total || 0;
+    if (recentFlags >= 5) {
+      return badRequest(res, "Too many violation reports for this quiz within a short period.");
     }
 
     // Push the violation directly to the quiz's cheatLogs array
@@ -100,28 +112,13 @@ export const flagQuizAttempt = async (req, res) => {
       },
     );
 
-    // Rate-limit flags per student per quiz to prevent log flooding
-    // Count how many times this specific student flagged this quiz in the last minute
-    const recentFlags = await Quiz.countDocuments({
-      _id: id,
-      'cheatLogs.student': studentId,
-      'cheatLogs.timestamp': { $gte: new Date(Date.now() - 60_000) }, // Last 60 seconds
-    });
-    if (recentFlags > 5) { // Allow up to 5 flags per minute to catch rapid multiple violations
-      return badRequest(res, "Too many violation reports for this quiz within a short period.");
-    }
-
     // Notify the teacher about the potential cheating attempt
     const io = req.app.get('io');
     if (io) {
-      // ✅ Use the update result and a single findById with null guard
-      const quiz = await Quiz.findById(id).select('author title');
-      if (quiz) {  // ← null guard
-        io.to(quiz.author.toString()).emit('cheat_alert', {
-          studentId, studentName: req.user.name,
-          quizTitle: quiz.title, violationType,
-        });
-      }
+      io.to(quiz.author.toString()).emit('cheat_alert', {
+        studentId, studentName: req.user.name,
+        quizTitle: quiz.title, violationType,
+      });
     }
 
     ok(res, null, "Violation logged successfully");

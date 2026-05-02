@@ -36,7 +36,7 @@ export const compileCode = async (languageId, code, stdin = '', rapidApiKey = ''
 };
 
 export const runCodeOnLocalSandbox = async (languageId, code, stdin, rapidApiKey = '') => {
-  const res = await axios.post('/api/compiler/compile', {
+  const res = await apiClient.post('/compiler/compile', {
     language: languageId,
     code,
     stdin: stdin || '',

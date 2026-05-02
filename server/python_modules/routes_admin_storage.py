@@ -10,20 +10,28 @@ Allows admins to:
 
 from flask import Blueprint, request, jsonify
 from storage_manager import init_storage_manager, BACKEND_TYPES
+from media_storage_manager import init_media_storage_manager
 import logging
 from auth_middleware import admin_required
 
 logger = logging.getLogger(__name__)
 
-storage_bp = Blueprint('admin_storage', __name__, url_prefix='/python-api/admin/storage')
+storage_bp = Blueprint('admin_storage', __name__, url_prefix='/admin/storage')
+
+def get_manager():
+    target = request.args.get('target', 'model')
+    if target == 'media':
+        return init_media_storage_manager()
+    return init_storage_manager()
 
 # ✅ Enforce per-backend allowlists for config updates
 ALLOWED_CONFIG_KEYS = {
     'local':        {'path'},
     'google_drive': {'credentials_file', 'folder_id'},
-    'aws_s3':       {'bucket', 'region', 'access_key', 'secret_key'},
+    'aws_s3':       {'bucket', 'region', 'access_key', 'secret_key', 'cdn_url'},
     'azure_blob':   {'account_name', 'account_key', 'container'},
     'huggingface':  set(),
+    'cloudinary':   {'cloud_name', 'api_key', 'api_secret'},
 }
 
 MAX_PRIORITY = 100
@@ -34,7 +42,7 @@ MAX_PRIORITY = 100
 def get_storage_config():
     """Get current storage configuration"""
     try:
-        manager = init_storage_manager()
+        manager = get_manager()
         config = manager.storage_config.get_json()
         
         return jsonify({
@@ -53,7 +61,7 @@ def get_storage_config():
 def get_storage_status():
     """Get real-time status of all storage backends"""
     try:
-        manager = init_storage_manager()
+        manager = get_manager()
         status = manager.get_status()
         
         return jsonify({
@@ -71,7 +79,7 @@ def get_storage_status():
 def enable_backend(backend_type):
     """Enable a storage backend"""
     try:
-        manager = init_storage_manager()
+        manager = get_manager()
         updates = {'enabled': True}
         success = manager.storage_config.update_backend(backend_type, updates)
         
@@ -96,7 +104,7 @@ def disable_backend(backend_type):
         if backend_type == 'local':
             return jsonify({'error': 'Cannot disable local backend'}), 400
         
-        manager = init_storage_manager()
+        manager = get_manager()
         updates = {'enabled': False}
         success = manager.storage_config.update_backend(backend_type, updates)
         
@@ -124,7 +132,7 @@ def update_priority(backend_type):
         if not isinstance(priority, int) or not (1 <= priority <= MAX_PRIORITY):
             return jsonify({'error': f'Priority must be integer between 1 and {MAX_PRIORITY}'}), 400
         
-        manager = init_storage_manager()
+        manager = get_manager()
         
         # Check for priority collision
         existing = [b for b in manager.storage_config.backends
@@ -176,7 +184,7 @@ def update_backend_config(backend_type):
         
         safe_updates = {k: v for k, v in config_updates.items() if k in allowed}
         
-        manager = init_storage_manager()
+        manager = get_manager()
         
         # Get existing backend
         backend = manager.storage_config.get_backend_by_type(backend_type)
@@ -186,8 +194,9 @@ def update_backend_config(backend_type):
         # Update config
         backend.config.update(safe_updates)
         
-        # Save changes
-        for backend_cfg in manager.storage_config.config['model_storage']['backends']:
+        target = request.args.get('target', 'model')
+        settings_key = 'media_storage' if target == 'media' else 'model_storage'
+        for backend_cfg in manager.storage_config.config[settings_key]['backends']:
             if backend_cfg['type'] == backend_type:
                 backend_cfg['config'].update(safe_updates)
         
@@ -213,7 +222,7 @@ def update_backend_config(backend_type):
 def list_backends():
     """List all available backends with their status"""
     try:
-        manager = init_storage_manager()
+        manager = get_manager()
         backends_info = []
         
         for backend in manager.storage_config.backends:
@@ -244,8 +253,10 @@ def list_backends():
 def get_settings():
     """Get storage settings (threshold, cache location, etc.)"""
     try:
-        manager = init_storage_manager()
-        settings = manager.storage_config.config['model_storage']
+        manager = get_manager()
+        target = request.args.get('target', 'model')
+        settings_key = 'media_storage' if target == 'media' else 'model_storage'
+        settings = manager.storage_config.config[settings_key]
         
         return jsonify({
             'success': True,
@@ -268,9 +279,10 @@ def update_settings():
     """Update storage settings"""
     try:
         data = request.json or {}
-        manager = init_storage_manager()
-        
-        settings = manager.storage_config.config['model_storage']
+        manager = get_manager()
+        target = request.args.get('target', 'model')
+        settings_key = 'media_storage' if target == 'media' else 'model_storage'
+        settings = manager.storage_config.config[settings_key]
         
         threshold = data.get('large_file_threshold_gb')
         if threshold is not None:

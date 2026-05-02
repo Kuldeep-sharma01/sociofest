@@ -22,18 +22,17 @@ services:
     env_file:
       - ./server/.env
     environment:
-      - MONGODB_URI=mongodb://mongodb:27017/smart-attendance
+      - MONGODB_URI=mongodb://mongodb:27017/sociofestdb
       - NODE_ENV=production
-      - PYTHON_API_URL=http://python-service:5001
+      - PYTHON_URL=http://python-service:5001
       - VOICE_AI_URL=http://voice-ai:8000
       - CUSTOM_AI_URL=http://voice-ai:8000/clone-voice
-      - VITE_CLIENT_URL=http://localhost:5173,http://127.0.0.1:5173,http://localhost,http://127.0.0.1
+      - FRONTEND_URL=http://localhost:5173,http://127.0.0.1:5173,http://localhost,http://127.0.0.1
     volumes:
       - backend_uploads:/app/uploads
     depends_on:
       - mongodb
       - python-service
-      - voice-ai
     healthcheck:
       test: [ "CMD-SHELL", "curl -fsS http://localhost:5000/health >/dev/null || exit 1" ]
       interval: 10s
@@ -48,7 +47,8 @@ services:
     env_file:
       - ./server/python_modules/.env
     environment:
-      - MONGODB_URI=mongodb://mongodb:27017/smart-attendance
+      - MONGODB_URI=mongodb://mongodb:27017/sociofestdb
+      - FRONTEND_URL=http://localhost:5173,http://127.0.0.1:5173,http://localhost,http://127.0.0.1
     depends_on:
       - mongodb
     healthcheck:
@@ -57,11 +57,15 @@ services:
       timeout: 5s
       retries: 5
 
+  # Voice AI is optional — requires heavy ML deps. Use profile to opt-in:
+  #   docker compose --profile voice up -d
   voice-ai:
     build:
       context: ./server/python_modules
       dockerfile: Dockerfile.voice
     container_name: sociofest-voice-ai
+    profiles:
+      - voice
     ports:
       - "8000:8000"
     restart: unless-stopped

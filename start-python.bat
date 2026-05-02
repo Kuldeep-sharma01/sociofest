@@ -1,0 +1,13 @@
+@echo off
+echo 🐍 Starting SocioFest Python AI Service...
+cd server/python_modules
+if not exist "venv\" (
+  echo Creating Virtual Environment...
+  call python -m venv venv
+)
+echo Activating Environment and Installing Packages...
+call venv\Scripts\activate.bat
+call pip install -r requirements.txt --quiet
+echo Starting Python AI (Face Rec, Image Gen) on Port 5001...
+call python -m waitress --listen=0.0.0.0:5001 app:app
+pause

@@ -1,0 +1,99 @@
+{
+  "media_storage": {
+    "enabled": true,
+    "large_file_threshold_gb": 1,
+    "supported_types": {
+      "image": [
+        "jpg",
+        "jpeg",
+        "png",
+        "webp",
+        "gif",
+        "svg"
+      ],
+      "video": [
+        "mp4",
+        "avi",
+        "mov",
+        "mkv",
+        "webm"
+      ],
+      "document": [
+        "pdf",
+        "docx",
+        "txt",
+        "csv"
+      ],
+      "audio": [
+        "mp3",
+        "wav",
+        "ogg",
+        "m4a"
+      ]
+    },
+    "max_file_size_gb": 10,
+    "backends": [
+      {
+        "type": "local",
+        "name": "Local Storage (Native)",
+        "enabled": true,
+        "priority": 1,
+        "config": {
+          "path": "../uploads/media"
+        }
+      },
+      {
+        "type": "google_drive",
+        "name": "Google Drive Media Backup",
+        "enabled": false,
+        "priority": 2,
+        "config": {
+          "credentials_file": ".env.secrets/google-drive-credentials.json",
+          "folder_id": null
+        }
+      },
+      {
+        "type": "aws_s3",
+        "name": "AWS S3 Media CDN",
+        "enabled": false,
+        "priority": 3,
+        "config": {
+          "bucket": "sociofest-media",
+          "region": "us-east-1",
+          "access_key": null,
+          "secret_key": null,
+          "cdn_url": null
+        }
+      },
+      {
+        "type": "azure_blob",
+        "name": "Azure Blob Media",
+        "enabled": false,
+        "priority": 4,
+        "config": {
+          "account_name": null,
+          "account_key": null
+        }
+      },
+      {
+        "type": "cloudinary",
+        "name": "Cloudinary CDN",
+        "enabled": false,
+        "priority": 5,
+        "config": {
+          "cloud_name": null,
+          "api_key": null,
+          "api_secret": null
+        }
+      }
+    ],
+    "retention_policy": {
+      "enabled": false,
+      "delete_after_days": 90
+    },
+    "caching": {
+      "enable_cdn": true,
+      "cache_ttl_hours": 24
+    }
+  }
+}

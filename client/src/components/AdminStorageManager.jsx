@@ -21,21 +21,22 @@ const AdminStorageManager = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('backends'); // backends, settings, status
+  const [target, setTarget] = useState('model'); // model, media
   const [editingBackend, setEditingBackend] = useState(null);
 
   useEffect(() => {
     loadData();
     const interval = setInterval(loadData, 10000); // Refresh every 10s
     return () => clearInterval(interval);
-  }, []);
+  }, [target]);
 
   const loadData = async () => {
     try {
       const [backendsRes, configRes, statusRes, settingsRes] = await Promise.all([
-        pythonAPI.getStorageBackends(),
-        pythonAPI.getStorageConfig(),
-        pythonAPI.getStorageStatus(),
-        pythonAPI.getStorageSettings(),
+        pythonAPI.getStorageBackends(target),
+        pythonAPI.getStorageConfig(target),
+        pythonAPI.getStorageStatus(target),
+        pythonAPI.getStorageSettings(target),
       ]);
 
       setBackends(backendsRes.backends);
@@ -52,7 +53,7 @@ const AdminStorageManager = () => {
 
   const handleToggleBackend = async (backendType, enabled) => {
     try {
-      await pythonAPI.toggleStorageBackend(backendType, enabled);
+      await pythonAPI.toggleStorageBackend(backendType, enabled, target);
       loadData();
     } catch (err) {
       setError(err.message || 'Failed to update backend');
@@ -61,7 +62,7 @@ const AdminStorageManager = () => {
 
   const handlePriorityChange = async (backendType, newPriority) => {
     try {
-      await pythonAPI.updateStorageBackendPriority(backendType, parseInt(newPriority, 10));
+      await pythonAPI.updateStorageBackendPriority(backendType, parseInt(newPriority, 10), target);
       loadData();
     } catch (err) {
       setError(err.message || 'Failed to update priority');
@@ -70,7 +71,7 @@ const AdminStorageManager = () => {
 
   const handleConfigUpdate = async (backendType, newConfig) => {
     try {
-      await pythonAPI.updateStorageBackendConfig(backendType, newConfig);
+      await pythonAPI.updateStorageBackendConfig(backendType, newConfig, target);
       loadData();
       setEditingBackend(null);
     } catch (err) {
@@ -84,7 +85,19 @@ const AdminStorageManager = () => {
 
   return (
     <div style={styles.container}>
-      <h1 style={styles.title}>☁️ Multi-Cloud Model Storage Management</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+        <h1 style={{ ...styles.title, marginBottom: 0 }}>
+          ☁️ Multi-Cloud {target === 'model' ? 'Model' : 'Media'} Storage
+        </h1>
+        <select 
+          value={target} 
+          onChange={(e) => setTarget(e.target.value)}
+          style={{ ...styles.select, width: '200px' }}
+        >
+          <option value="model">🧠 AI Model Storage</option>
+          <option value="media">🖼️ User Media Storage</option>
+        </select>
+      </div>
 
       {error && <div style={styles.errorBox}>{error}</div>}
 
@@ -352,6 +365,10 @@ const AdminStorageManager = () => {
                 <li>No configuration needed</li>
                 <li>Good for: Development, caching</li>
                 <li>Cannot be disabled</li>
+              <h4>Cloudinary</h4>
+              <ul>
+                <li>Requires: Cloud Name, API Key, API Secret</li>
+                <li>Good for: Image/Video CDN & Transformations</li>
               </ul>
             </div>
           </div>

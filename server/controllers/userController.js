@@ -34,6 +34,29 @@ import crypto from "crypto";
 import { sendEmail } from "../utils/emailUtils.js";
 import { VALID_ROLES } from "../utils/rbac.js";
 
+// ── Rate limiting for email OTP resend (prevents spam) ────────────────────────
+const resendEmailOtpAttempts = new Map();
+const MAX_RESEND_EMAIL_OTP = 3;
+const RESEND_EMAIL_OTP_WINDOW = 15 * 60 * 1000; // 15 minutes
+
+const isEmailOtpRateLimited = (ip) => {
+  const rec = resendEmailOtpAttempts.get(ip);
+  return rec && Date.now() < rec.resetTime && rec.count >= MAX_RESEND_EMAIL_OTP;
+};
+
+const trackEmailOtpAttempt = (ip) => {
+  const now = Date.now();
+  const rec = resendEmailOtpAttempts.get(ip) || { count: 0, resetTime: 0 };
+  if (now >= rec.resetTime) {
+    rec.count = 1;
+    rec.resetTime = now + RESEND_EMAIL_OTP_WINDOW;
+  } else {
+    rec.count++;
+  }
+  resendEmailOtpAttempts.set(ip, rec);
+  return rec;
+};
+
 const parseCSVLine = (line) => {
   const values = [];
   let current = "";
@@ -129,7 +152,7 @@ const mapSubjectNamesToIds = (deptId, subjectsString, allSubjects) => {
 };
 
 const PRIVATE_USER_SELECT =
-  "-password -emails.password -emails.otp -emails.otpExpires -otp -otpExpires +aiChatHistory +geminiApiKey +rapidApiKey +openAiApiKey +claudeApiKey +stabilityApiKey +deepseekApiKey +perplexityApiKey +boltApiKey +v0devApiKey +emergentApiKey +huggingfaceApiKey +openRouterApiKey";
+  "-password -emails.password -emails.otp -emails.otpExpires -otp -otpExpires +faceEncodingVector +aiChatHistory +geminiApiKey +rapidApiKey +openAiApiKey +claudeApiKey +stabilityApiKey +deepseekApiKey +perplexityApiKey +boltApiKey +v0devApiKey +emergentApiKey +huggingfaceApiKey +openRouterApiKey";
 const PUBLIC_USER_SELECT =
   "-password -emails.password -emails.otp -emails.otpExpires -geminiApiKey -rapidApiKey -aiChatHistory -otp -otpExpires";
 
@@ -143,11 +166,28 @@ const attachPrimaryEmail = (user) => {
   return user;
 };
 
-/**
- * @desc Get all users
- * @route GET /api/users
- * @access Private (Admin / HOD)
- */
+export const clearFaceRegistration = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return notFound(res);
+    
+    // Authorization check: Self or Admin
+    if (req.user._id.toString() !== user._id.toString() && req.user.role !== 'Admin') {
+      return forbidden(res, "Not authorized to clear this user's face data");
+    }
+
+    user.faceEncodingVector = undefined;
+    user.isFaceRegistered = false;
+    await user.save();
+    
+    ok(res, null, "Face registration cleared successfully");
+  } catch (error) {
+    logger.error("Error clearing face registration", { error: error.message, userId: req.params.id });
+    serverError(res);
+  }
+};
+
+
 
 export const getAllUsers = async (req, res) => {
   try {
@@ -247,7 +287,8 @@ export const getAllUsers = async (req, res) => {
 
     const enrichedUsers = users.map((u) => {
       let extraData = {};
-      extraData.email = u.emails?.[0]?.address || u.email;
+      // No need to copy email, it's already on 'u' from User model
+
       if (u.role === "Student" && studentMap[u._id]) {
         extraData.semester = studentMap[u._id].semester;
         extraData.rollNumber = studentMap[u._id].rollNumber;
@@ -315,49 +356,58 @@ export const getUserById = async (req, res) => {
  */
 export const updateUser = async (req, res) => {
   try {
-    const { name, role, department } = req.body;
+    const { name, role, department, status, enrollmentNumber, phone } = req.body;
     const user = await User.findById(req.params.id);
 
     if (!user) return notFound(res);
 
-    const isSameDepartmentHOD =
-      req.user.role === "HOD" &&
-      String(user.department) === String(req.user.department);
+    const isSelf = req.user._id.toString() === user._id.toString();
+    const isAdmin = req.user.role === "Admin";
+    const isHOD = req.user.role === "HOD" && String(user.department) === String(req.user.department);
+    const isTeacherOfStudent = req.user.role === "Teacher" && user.role === "Student" && String(user.department) === String(req.user.department);
 
-    const isSameDepartmentTeacher =
-      req.user.role === "Teacher" &&
-      user.role === "Student" &&
-      String(user.department) === String(req.user.department);
-
-    // Self-update restriction
-    if (
-      req.user._id.toString() !== user._id.toString() &&
-      req.user.role !== "Admin" &&
-      !isSameDepartmentHOD &&
-      !isSameDepartmentTeacher
-    ) {
+    // 1. Authorization Check
+    if (!isSelf && !isAdmin && !isHOD && !isTeacherOfStudent) {
       return forbidden(res, "Not authorized to update this user");
     }
 
-    user.name = name || user.name;
+    // 2. Field Whitelisting (Security Policy)
+    // Always allowed: name and phone (even for self)
+    if (name) user.name = name;
+    if (phone) user.phone = phone;
 
-    if (department) {
-      const dept = await Department.findOne({ name: department });
-      if (dept) user.department = dept._id;
+    // Admin/HOD only: department, enrollmentNumber
+    if (isAdmin || isHOD) {
+      if (department) {
+        const dept = await Department.findOne({ name: department });
+        if (dept) user.department = dept._id;
+      }
+      if (enrollmentNumber) user.enrollmentNumber = enrollmentNumber;
     }
 
-    // Only Admin/HOD can change roles
-    if (["Admin", "HOD"].includes(req.user.role) && role) {
-      user.role = role;
+    // Admin only: role, status
+    if (isAdmin) {
+      if (role && VALID_ROLES.includes(role)) user.role = role;
+      if (status && ["Approved", "Rejected", "Blocked", "Pending"].includes(status)) user.status = status;
+    } else if (isHOD) {
+       // HODs can approve/reject students in their dept, but role changes are restricted
+       if (status && ["Approved", "Rejected", "Blocked"].includes(status)) {
+          if (user.role === "Student" || user.role === "Teacher") {
+            user.status = status;
+          }
+       }
     }
 
     const updatedUser = await user.save();
-    ok(res, { user: updatedUser }, "User updated successfully");
+    
+    const userObj = updatedUser.toObject();
+    delete userObj.password;
+    
+    ok(res, { user: userObj }, "User updated successfully");
   } catch (error) {
     logger.error("Error updating user", { error: error.message, stack: error.stack, userId: req.params.id });
     serverError(res);
   }
-
 };
 
 /**
@@ -453,6 +503,14 @@ export const deleteUser = async (req, res) => {
     await Comment.deleteMany({ author: userId });
     await AssignmentSubmission.deleteMany({ student: userId });
     await QuizSubmission.deleteMany({ student: userId });
+    
+    // ✅ NEW: Clean up Attendance and Role Profiles
+    const Attendance = mongoose.model("Attendance");
+    await Attendance.deleteMany({ student: userId });
+    await Student.deleteMany({ userId });
+    await Teacher.deleteMany({ userId });
+    await HOD.deleteMany({ userId });
+    await Seller.deleteMany({ userId });
 
     await Message.deleteMany({
       $or: [{ sender: userId }, { receiver: userId }],
@@ -597,13 +655,17 @@ export const updateUserStatus = async (req, res) => {
     }
 
     if (currentUser.role === "Teacher") {
+      if (!currentUser.department) {
+        return forbidden(res, "Your account does not have a department assigned. Please contact an Admin.");
+      }
       if (
         !["Student", "Teacher"].includes(user.role) ||
+        !user.department ||
         String(user.department) !== String(currentUser.department)
       ) {
         return forbidden(
           res,
-          "Teachers can only manage Students and Teachers in their department.",
+          "Teachers can only manage Students and Teachers in their own department.",
         );
       }
 
@@ -657,7 +719,13 @@ export const updateUserStatus = async (req, res) => {
       }
     }
 
-    ok(res, { user }, `User status updated to ${status}.`);
+    const userObj = user.toObject();
+    if (user.role === "Student") userObj.studentData = await Student.findOne({ userId: user._id }).lean();
+    if (user.role === "Teacher") userObj.teacherData = await Teacher.findOne({ userId: user._id }).lean();
+    if (user.role === "HOD") userObj.hodData = await HOD.findOne({ userId: user._id }).lean();
+    if (user.role === "Seller") userObj.sellerData = await Seller.findOne({ userId: user._id }).lean();
+
+    ok(res, { user: userObj }, `User status updated to ${status}.`);
   } catch (error) {
     serverError(res);
   }
@@ -793,8 +861,11 @@ export const bulkUpdateSemester = async (req, res) => {
       }
 
       if (currentUser.role === "Teacher" || currentUser.role === "HOD") {
-        if (String(user.department) !== String(currentUser.department)) {
-          return forbidden(res, "Not authorized to manage this student.");
+        const targetDept = user.department?._id || user.department;
+        const managerDept = currentUser.department?._id || currentUser.department;
+        
+        if (!managerDept || !targetDept || String(targetDept) !== String(managerDept)) {
+          return forbidden(res, "Not authorized to manage a student outside of your department.");
         }
       }
 
@@ -917,6 +988,7 @@ export const bulkUploadUsers = async (req, res) => {
     const studentOps = [];
     const teacherOps = [];
     const hodOps = [];
+    const teacherSubjectAssignments = new Map(); // subjectId -> Set(userId)
 
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index];
@@ -986,6 +1058,7 @@ export const bulkUploadUsers = async (req, res) => {
             document: {
               _id: userId,
               name,
+              email, // Required top-level field for User schema
               role: targetRole,
               password: hashedPassword, // Fix: Ensure password is at the root for authController matching
               department: deptId,
@@ -997,7 +1070,6 @@ export const bulkUploadUsers = async (req, res) => {
               emails: [
                 {
                   address: email,
-                  password: hashedPassword,
                   isVerified: false,
                 },
               ],
@@ -1032,6 +1104,17 @@ export const bulkUploadUsers = async (req, res) => {
             upsert: true,
           },
         });
+
+        // Collect teacher-subject assignments for bidirectional consistency
+        if (subjects && subjects.length > 0) {
+          subjects.forEach((subId) => {
+            const sId = subId.toString();
+            if (!teacherSubjectAssignments.has(sId)) {
+              teacherSubjectAssignments.set(sId, new Set());
+            }
+            teacherSubjectAssignments.get(sId).add(userId);
+          });
+        }
       }
 
       if (targetRole === "HOD") {
@@ -1062,6 +1145,21 @@ export const bulkUploadUsers = async (req, res) => {
     if (studentOps.length > 0) await Student.bulkWrite(studentOps, { session });
     if (teacherOps.length > 0) await Teacher.bulkWrite(teacherOps, { session });
     if (hodOps.length > 0) await HOD.bulkWrite(hodOps, { session });
+
+    // Bidirectional consistency: Update Subject model with assigned teachers
+    if (teacherSubjectAssignments.size > 0) {
+      const subUpdates = [];
+      for (const [subId, teacherIdsSet] of teacherSubjectAssignments.entries()) {
+        subUpdates.push(
+          Subject.updateOne(
+            { _id: subId },
+            { $addToSet: { assignedTeacher: { $each: Array.from(teacherIdsSet) } } },
+            { session }
+          )
+        );
+      }
+      await Promise.all(subUpdates);
+    }
 
     await session.commitTransaction();
     session.endSession();
@@ -1342,6 +1440,7 @@ export const updateUserProfile = async (req, res) => {
       studentData,
       teacherData,
       hodData,
+      sellerData,
       bio,
       location,
       contactNumber,
@@ -1363,6 +1462,7 @@ export const updateUserProfile = async (req, res) => {
       huggingfaceApiKey,
       openRouterApiKey,
       aiChatHistory,
+      enrollmentNumber,
     } = req.body;
 
     const user = await User.findById(req.params.id).session(session);
@@ -1402,7 +1502,7 @@ export const updateUserProfile = async (req, res) => {
     if (location !== undefined) user.location = location;
     if (contactNumber !== undefined) user.contactNumber = contactNumber;
     if (dob !== undefined) user.dob = dob;
-    if (isDnd !== undefined) user.isDnd = isDnd;
+    user.isDnd = isDnd !== undefined ? isDnd : user.isDnd;
     if (savedLectures !== undefined) user.savedLectures = savedLectures;
     if (savedPosts !== undefined) user.savedPosts = savedPosts;
     if (geminiApiKey !== undefined) user.geminiApiKey = geminiApiKey;
@@ -1418,6 +1518,17 @@ export const updateUserProfile = async (req, res) => {
     if (huggingfaceApiKey !== undefined) user.huggingfaceApiKey = huggingfaceApiKey;
     if (openRouterApiKey !== undefined) user.openRouterApiKey = openRouterApiKey;
     if (aiChatHistory !== undefined) user.aiChatHistory = aiChatHistory;
+    if (enrollmentNumber !== undefined) {
+      user.enrollmentNumber = enrollmentNumber;
+      // Sync back to student rollNumber if user is a student
+      if (user.role === "Student") {
+        await Student.findOneAndUpdate(
+          { userId: user._id },
+          { $set: { rollNumber: Number(enrollmentNumber) } },
+          { session }
+        );
+      }
+    }
 
     // Handle skills (ensure array)
     if (skills) {
@@ -1481,6 +1592,12 @@ export const updateUserProfile = async (req, res) => {
     // Department handling
     if (department) {
       if (newRole === "HOD") {
+        const existingDept = await Department.findOne({ name: department }).session(session);
+        if (existingDept && existingDept.hod && String(existingDept.hod) !== String(user._id)) {
+          await session.abortTransaction();
+          session.endSession();
+          return badRequest(res, `The department '${department}' already has an HOD. You must remove the current HOD before assigning a new one.`);
+        }
         const dept = await Department.findOneAndUpdate(
           { name: department },
           {
@@ -1508,6 +1625,10 @@ export const updateUserProfile = async (req, res) => {
     // Upsert role-specific data
     let updatedRoleData = {};
     if (newRole === "Student" && studentData) {
+      // Sync rollNumber to user.enrollmentNumber if present
+      if (studentData.rollNumber) {
+        user.enrollmentNumber = String(studentData.rollNumber);
+      }
       updatedRoleData = await Student.findOneAndUpdate(
         { userId: user._id },
         { $set: studentData },
@@ -1545,42 +1666,67 @@ export const updateUserProfile = async (req, res) => {
               if (sub._id && mongoose.Types.ObjectId.isValid(sub._id)) {
                 let existingSub = await Subject.findById(sub._id).session(session);
                 if (existingSub) {
+                  // If HOD/Admin, allow updating subject details
                   if (req.user.role === "HOD" || req.user.role === "Admin") {
-                    existingSub.name = sub.subject;
-                    existingSub.semester = sub.semester;
+                    existingSub.name = sub.subject || existingSub.name;
+                    existingSub.semester = sub.semester || existingSub.semester;
                     if (sub.code) existingSub.code = sub.code;
                     await existingSub.save({ session });
                   }
                   subjectIds.push(existingSub._id);
                 }
               } else {
+                // Case-insensitive search for existing subject
                 let existingSub = await Subject.findOne({
                   department: dept._id,
-                  name: sub.subject,
+                  name: { $regex: new RegExp(`^${sub.subject.trim()}$`, "i") },
                   semester: sub.semester,
                 }).session(session);
+
                 if (existingSub) {
                   subjectIds.push(existingSub._id);
-                } else if (req.user.role === "HOD" || req.user.role === "Admin") {
+                } else if (["Teacher", "HOD", "Admin"].includes(req.user.role)) {
+                  // Allow Teachers, HODs, and Admins to create the subject if it doesn't exist
                   const subjectCode =
                     sub.code ||
                     `${sub.subject.replace(/\s/g, "").toUpperCase().slice(0, 4)}${user.department.toString().slice(-4)}${sub.semester}`;
+                  
                   const newSub = await Subject.create([{
-                    name: sub.subject,
+                    name: sub.subject.trim(),
                     semester: sub.semester,
                     code: subjectCode,
-                    department: dept._id
+                    department: dept._id,
+                    assignedTeacher: [user._id] // Link teacher immediately
                   }], { session });
+                  
                   dept.subjects.push(newSub[0]._id);
                   subjectIds.push(newSub[0]._id);
                 }
               }
             }
           }
+
           const newSubjectIdsStr = subjectIds.map((id) => id.toString());
           const removedIds = oldSubjectIds.filter(
             (id) => !newSubjectIdsStr.includes(id),
           );
+
+          // Update bidirectional consistency: Link/Unlink Teacher in Subject model
+          if (subjectIds.length > 0) {
+            await Subject.updateMany(
+              { _id: { $in: subjectIds } },
+              { $addToSet: { assignedTeacher: user._id } },
+              { session }
+            );
+          }
+          if (removedIds.length > 0) {
+            await Subject.updateMany(
+              { _id: { $in: removedIds } },
+              { $pull: { assignedTeacher: user._id } },
+              { session }
+            );
+          }
+
           await dept.save({ session });
         }
 
@@ -1605,7 +1751,15 @@ export const updateUserProfile = async (req, res) => {
         updatedRoleData = { ...updatedRoleData, ...teacherProfile };
       }
     }
+     if (newRole === "Seller" && sellerData) {
+      updatedRoleData = await Seller.findOneAndUpdate(
+        { userId: user._id },
+        { $set: sellerData },
+        { upsert: true, new: true, session },
+      ).lean();
+    }
 
+    // Save User updates
     await user.save({ session });
     await session.commitTransaction();
     session.endSession();
@@ -1694,18 +1848,26 @@ export const getSubjects = async (req, res) => {
       subjects = subjects.filter((s) => s.semester === semester);
     }
 
-    // Map teachers to subjects accurately using the Teacher model
+    // Map teachers to subjects accurately using both Subject's own field and the Teacher model
     const subjectIds = subjects.map((s) => s._id);
-    const teachers = await Teacher.find({
+    const teachersFromModel = await Teacher.find({
       subjects: { $in: subjectIds },
-    }).populate("userId", "name email profilePicture role");
+    }).populate("userId", "name email profilePicture role").lean();
 
-    subjects = subjects.map((s) => ({
-      ...s,
-      assignedTeacher: teachers
+    subjects = subjects.map((s) => {
+      const teachersFromTeacherModel = teachersFromModel
         .filter((t) => t.subjects.some((id) => String(id) === String(s._id)))
-        .map((t) => t.userId),
-    }));
+        .map((t) => t.userId);
+
+      // Merge with Subject's own assignedTeacher if it exists and is populated
+      // (Note: we didn't explicitly populate s.assignedTeacher in Subject.find, 
+      // but if it's there as IDs, we should probably handle it or just rely on the Teacher model which is the source of truth for "Profile" edits)
+      
+      return {
+        ...s,
+        assignedTeacher: teachersFromTeacherModel,
+      };
+    });
 
     ok(res, { subjects }, "Subjects retrieved successfully.");
   } catch (error) {
@@ -1771,6 +1933,13 @@ export const getDepartmentHODKeys = async (req, res) => {
     const response = {
       Semesters: department.totalSemesters || 0,
     };
+
+    // ✅ Include requesting user's personal keys
+    const requestingUser = await User.findById(req.user._id).select("+rapidApiKey +geminiApiKey");
+    if (requestingUser) {
+      response.personalRapidApiKey = requestingUser.rapidApiKey;
+      response.personalGeminiApiKey = requestingUser.geminiApiKey;
+    }
 
     if (hodUser) {
       if (hodUser.emails && hodUser.emails.length > 0) {
@@ -2086,7 +2255,59 @@ export const verifyNewEmail = async (req, res) => {
 
     ok(res, { user: safeUser }, "Email verified successfully.");
   } catch (error) {
-logger.error("Error verifying new email:", { error: error.message, stack: error.stack, userId: req.user._id });
+    logger.error("Error verifying new email:", { error: error.message, stack: error.stack, userId: req.user._id });
+    serverError(res);
+  }
+};
+
+/**
+ * @desc Resend OTP for a newly added email address
+ * @route POST /api/users/profile/resend-email-otp
+ * @access Private (Self)
+ */
+export const resendNewEmailOTP = async (req, res) => {
+  try {
+    const clientIp = req.ip || req.headers['x-forwarded-for'] || req.connection?.remoteAddress;
+    if (isEmailOtpRateLimited(clientIp)) {
+      return res.status(429).json({ message: 'Too many OTP resend attempts. Please try again later.' });
+    }
+    const { email } = req.body;
+    if (!email) {
+      return badRequest(res, "Email is required.");
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) return notFound(res, "User not found.");
+
+    const emailRecord = user.emails.find((e) => e.address === email);
+    if (!emailRecord)
+      return notFound(res, "Email address not found on your profile.");
+    if (emailRecord.isVerified)
+      return badRequest(res, "This email is already verified.");
+
+    // Generate new OTP
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    emailRecord.otp = otpCode;
+    emailRecord.otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    await user.save();
+
+    // Send verification email
+    try {
+      await sendEmail(
+        email,
+        "SocioFest - Verify Your New Email Address (New Code)",
+        `<div style="font-family: Arial, sans-serif; text-align: center; padding: 20px;"><h2>Verify Your New Email</h2><p>Your new verification code is:</p><h1 style="font-size: 32px; letter-spacing: 5px; color: #4f46e5;">${otpCode}</h1><p>This code expires in 10 minutes.</p></div>`,
+      );
+    } catch (emailErr) {
+      logger.error("Failed to resend verification email", { error: emailErr.message, email });
+      trackEmailOtpAttempt(clientIp);
+      return ok(res, {}, "OTP generated, but email delivery failed. Please try again later.");
+    }
+
+    trackEmailOtpAttempt(clientIp);
+    ok(res, {}, "Verification code resent successfully.");
+  } catch (error) {
+    logger.error("Error resending new email OTP:", { error: error.message, stack: error.stack, userId: req.user._id });
     serverError(res);
   }
 };

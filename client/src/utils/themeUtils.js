@@ -1,29 +1,41 @@
-export const getCardThemeClasses = (appTheme) => {
-  switch (appTheme) {
-    case "whatsapp": return "bg-[#f0f2f5] dark:bg-[#202c33] border-[#e9edef] dark:border-[#222d34] text-[#111b21] dark:text-[#e9edef]";
-    case "discord": return "bg-[#2b2d31] text-gray-100 border-[#1e1f22]";
-    case "midnight": return "bg-slate-900 text-slate-100 border-slate-800";
-    case "hacker": return "bg-black border-green-900 text-green-500";
-    case "sunset": return "bg-[#ffedd5] border-orange-200 text-orange-900";
-    case "cyberpunk": return "bg-[#0f0f13] border-pink-900 text-pink-400";
-    case "dracula": return "bg-[#44475a] border-[#6272a4] text-[#f8f8f2]";
-    case "ocean": return "bg-[#f0f9ff] border-[#bae6fd] text-[#0c4a6e]";
-    default: return "bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 text-gray-900 dark:text-gray-100";
-  }
+export const getCardThemeClasses = (appTheme, is3DMode = false) => {
+  const baseClasses = (() => {
+    switch (appTheme) {
+      case "whatsapp": return "bg-[#f0f2f5] dark:bg-[#202c33] border-[#e9edef] dark:border-[#222d34] text-[#111b21] dark:text-[#e9edef]";
+      case "discord": return "bg-[#2b2d31] text-gray-100 border-[#1e1f22]";
+      case "midnight": return "bg-slate-900 text-slate-100 border-slate-800";
+      case "hacker": return "bg-black border-green-900 text-green-500";
+      case "sunset": return "bg-[#ffedd5] border-orange-200 text-orange-900";
+      case "cyberpunk": return "bg-[#0f0f13] border-pink-900 text-pink-400";
+      case "dracula": return "bg-[#44475a] border-[#6272a4] text-[#f8f8f2]";
+      case "ocean": return "bg-[#f0f9ff] border-[#bae6fd] text-[#0c4a6e]";
+      default: return "bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 text-gray-900 dark:text-gray-100";
+    }
+  })();
+  
+  return is3DMode 
+    ? `${baseClasses} three-d-card perspective-2000 shadow-2xl border-white/20 backdrop-blur-xl ring-1 ring-white/10` 
+    : baseClasses;
 };
 
-export const getPrimaryButtonClasses = (appTheme) => {
-  switch (appTheme) {
-    case "whatsapp": return "bg-emerald-600 hover:bg-emerald-700 text-white border-transparent";
-    case "discord": return "bg-indigo-500 hover:bg-indigo-600 text-white border-transparent";
-    case "midnight": return "bg-sky-600 hover:bg-sky-700 text-white border-transparent";
-    case "hacker": return "bg-green-600 hover:bg-green-700 text-black border-transparent";
-    case "sunset": return "bg-orange-500 hover:bg-orange-600 text-white border-transparent";
-    case "cyberpunk": return "bg-pink-600 hover:bg-pink-700 text-white border-transparent";
-    case "dracula": return "bg-purple-600 hover:bg-purple-700 text-white border-transparent";
-    case "ocean": return "bg-cyan-600 hover:bg-cyan-700 text-white border-transparent";
-    default: return "bg-blue-600 hover:bg-blue-700 text-white border-transparent";
-  }
+export const getPrimaryButtonClasses = (appTheme, is3DMode = false) => {
+  const baseClasses = (() => {
+    switch (appTheme) {
+      case "whatsapp": return "bg-emerald-600 hover:bg-emerald-700 text-white border-transparent";
+      case "discord": return "bg-indigo-500 hover:bg-indigo-600 text-white border-transparent";
+      case "midnight": return "bg-sky-600 hover:bg-sky-700 text-white border-transparent";
+      case "hacker": return "bg-green-600 hover:bg-green-700 text-black border-transparent";
+      case "sunset": return "bg-orange-500 hover:bg-orange-600 text-white border-transparent";
+      case "cyberpunk": return "bg-pink-600 hover:bg-pink-700 text-white border-transparent";
+      case "dracula": return "bg-purple-600 hover:bg-purple-700 text-white border-transparent";
+      case "ocean": return "bg-cyan-600 hover:bg-cyan-700 text-white border-transparent";
+      default: return "bg-blue-600 hover:bg-blue-700 text-white border-transparent";
+    }
+  })();
+
+  return is3DMode 
+    ? `${baseClasses} shadow-[0_10px_20px_-5px_rgba(0,0,0,0.3)] active:translate-y-1 active:shadow-inner transition-all transform hover:-translate-y-1 hover:scale-105 perspective-500` 
+    : baseClasses;
 };
 
 export const getBannerThemeClasses = (appTheme, defaultGradient = "bg-gradient-to-r from-blue-600 to-indigo-700 text-white") => {
@@ -281,5 +293,27 @@ export const getRowClasses = (appTheme, role) => {
     case "dracula": return "bg-[#44475a] border-y border-[#6272a4]";
     case "ocean": return "bg-[#e0f2fe] border-y border-[#bae6fd]";
     default: return "bg-gray-50 dark:bg-gray-800/50 border-y border-gray-100 dark:border-gray-800";
+  }
+};
+
+export const get3DCardClasses = (is3DMode) => {
+  return is3DMode ? "three-d-card perspective-2000 shadow-2xl transition-all duration-500" : "transition-all duration-300";
+};
+
+export const getGlassyClasses = (isDark) => {
+  return isDark ? "glass-dark glass-effect" : "glass glass-effect";
+};
+
+export const getAestheticGlow = (appTheme) => {
+  switch (appTheme) {
+    case "whatsapp": return "shadow-emerald-500/20";
+    case "discord": return "shadow-indigo-500/20";
+    case "midnight": return "shadow-sky-500/20";
+    case "hacker": return "shadow-green-500/20";
+    case "sunset": return "shadow-orange-500/20";
+    case "cyberpunk": return "shadow-pink-500/20";
+    case "dracula": return "shadow-purple-500/20";
+    case "ocean": return "shadow-cyan-500/20";
+    default: return "shadow-indigo-500/20";
   }
 };

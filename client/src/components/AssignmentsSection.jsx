@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { format } from 'date-fns';
 import { Plus, ClipboardList, Edit2, Trash2, CheckCircle, Upload, X } from 'lucide-react';
 import AssignmentCard from './ui/AssignmentCard';
 import SubmissionItem from './ui/SubmissionItem';
@@ -85,7 +86,7 @@ const AssignmentsSection = ({
   const handleEditAssignmentStart = (assignment) => {
     setEditingAssignmentId(assignment._id);
     const d = assignment.dueDate ? new Date(assignment.dueDate) : null;
-    const formattedDate = d ? new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
+    const formattedDate = d ? format(d, "yyyy-MM-dd'T'HH:mm") : "";
     setEditAssignmentData({
       title: assignment.title,
       description: assignment.material?.description || "",

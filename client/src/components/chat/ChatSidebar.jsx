@@ -4,7 +4,8 @@ import {
   MessageSquare,
   MessageCircle,
   Users,
-  Sparkles
+  Sparkles,
+  UserPlus
 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import UniversalSidebar from "@/components/ui/UniversalSidebar";
@@ -28,6 +29,7 @@ const ChatSidebar = ({
   setShowCreateGroupModal,
   blockedUsers = [],
   onAiMatchToggle,
+  handleConnect,
 }) => {
   const [chatFilter, setChatFilter] = useState("all");
   const [isAiMatching, setIsAiMatching] = useState(false);
@@ -147,27 +149,43 @@ const ChatSidebar = ({
             const unreadCount = conv?.unread || 0;
 
             return (
-              <button
+              <div
                 key={u._id}
                 onClick={() => handleSelectUserFromNetwork(u)}
-              className={`flex w-full items-center justify-between p-4 cursor-pointer transition-colors border-b border-inherit/30 ${selectedUser?._id === u._id ? `${getThemeSoftBg(appTheme)} border-l-4 border-l-current` : getThemeHoverBg(appTheme)}`}
+                className={`flex w-full items-center justify-between p-4 cursor-pointer transition-colors border-b border-inherit/30 ${selectedUser?._id === u._id ? `${getThemeSoftBg(appTheme)} border-l-4 border-l-current` : getThemeHoverBg(appTheme)}`}
               >
                 <UserInfo
                   user={u}
                   subtitle={getUserSubtitle(u)}
                   nameClassName={unreadCount > 0 ? "font-bold" : ""}
                 />
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 shrink-0 ml-2">
                   {unreadCount > 0 && (
                     <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center shadow-sm animate-in zoom-in">
                       {unreadCount}
                     </span>
                   )}
-                  <button className={`p-2 opacity-70 hover:opacity-100 ${getThemeHoverBg(appTheme)} rounded-full transition-colors`}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (handleConnect) handleConnect(u._id);
+                    }}
+                    className={`p-2.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-600 dark:text-blue-400 rounded-full transition-all active:scale-95 shadow-sm border border-blue-500/30`}
+                    title="Connect / Add Friend"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                  </button>
+                  <button
+                    className={`p-2.5 ${getThemeSoftBg(appTheme)} ${getThemeHoverBg(appTheme)} text-inherit rounded-full transition-all active:scale-95 shadow-sm border border-inherit/30`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSelectUserFromNetwork(u);
+                    }}
+                  >
                     <MessageCircle className="w-4 h-4" />
                   </button>
-                </div> 
-              </button>
+                </div>
+              </div>
             );
           })
         ) : (

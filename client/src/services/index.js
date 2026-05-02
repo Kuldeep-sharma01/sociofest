@@ -52,7 +52,7 @@ export * as pushService from './pushService';
 export * as wifiService from './wifiService';
 
 // ==================== API CLIENT & UTILITIES ====================
-export { apiClient, pythonClient, sdClient, toFormData } from './apiClient';
+export { apiClient, pythonClient, toFormData } from './apiClient';
 
 /**
  * SERVICES ORGANIZATION REFERENCE

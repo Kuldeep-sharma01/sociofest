@@ -29,22 +29,23 @@ import {
   Camera,
   Activity,
   BrainCircuit,
-  CheckSquare
+  CheckSquare,
+  Box
 } from "lucide-react";
 import { useSocket } from "@/context/SocketContext";
 import { useTheme, THEMES } from "@/context/ThemeContext";
 import UniversalSidebar from "@/components/ui/UniversalSidebar";
 import { getUnreadCount } from "@/services/chatService";
+import { API_URL } from "@/config/constants";
 import { updateUserProfile } from "@/services/userService";
 import { getPublicSystemSettings } from "@/services/systemSettingsService";
-import { getCardThemeClasses, getPrimaryButtonClasses } from "@/utils/themeUtils";
+import { getCardThemeClasses, getPrimaryButtonClasses, get3DCardClasses, getGlassyClasses } from "@/utils/themeUtils";
 
 const Sidebar = ({ sidebar }) => {
   const user = useSelector((state) => state.auth.user);
   const dispatch = useDispatch();
-  const location = useLocation();
   const socket = useSocket();
-  const { appTheme, setAppTheme } = useTheme();
+  const { appTheme, setAppTheme, is3DMode, toggle3DMode, isDark } = useTheme();
   const [unreadCounts, setUnreadCounts] = useState({
     chat: 0,
     notices: 0,
@@ -72,14 +73,29 @@ const Sidebar = ({ sidebar }) => {
   useEffect(() => {
     if (!user?._id || !socket) return;
 
-    const fetchUnreadCount = () => {
-      getUnreadCount()
-        .then((data) => {
-          setUnreadCounts((prev) => ({ ...prev, chat: data.count || 0 }));
-        })
-        .catch((err) =>
-          console.error("Failed to load sidebar unread count", err),
-        );
+    const fetchUnreadCount = async () => {
+      try {
+        const chatData = await getUnreadCount();
+        setUnreadCounts((prev) => ({ ...prev, chat: chatData.count || 0 }));
+        
+        // Fetch unread system notifications for the Activities badge
+        const notifsRes = await fetch(`${API_URL}/notifications`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+        });
+        if (notifsRes.ok) {
+          const resData = await notifsRes.json();
+          const allNotifs = Array.isArray(resData) ? resData : (resData.notifications || resData.data || []);
+          
+          // Filter: only count notifications that are NOT read and NOT dismissed
+          const dismissed = JSON.parse(localStorage.getItem(`dismissed_notifs_${user._id}`)) || [];
+          const unreadCount = allNotifs.filter(n => !n.isRead && !dismissed.includes(n._id)).length;
+          
+          setUnreadCounts((prev) => ({ ...prev, activities: unreadCount }));
+        }
+
+      } catch (err) {
+        console.error("Failed to load sidebar unread count", err);
+      }
     };
 
     fetchUnreadCount();
@@ -236,7 +252,7 @@ const Sidebar = ({ sidebar }) => {
     },
     {
       icon: User,
-      label: "Public Profile",
+      label: "My Profile",
       path: `/profile`,
       roles: ["Student", "Teacher", "Admin", "HOD", "Seller"],
     },
@@ -251,33 +267,39 @@ const Sidebar = ({ sidebar }) => {
       icon: BookImage,
       label: "Gallery",
       path: "/ai-gallery",
-      badge: unreadCounts.chat,
       roles: ["Student", "Teacher", "Admin", "HOD", "Seller"],
     },
     {
       icon: Code,
       label: "Compiler",
       path: "/compiler",
-      badge: unreadCounts.chat,
       roles: ["Student", "Teacher", "Admin", "HOD", "Seller"],
     },
   ];
 
+  if (user && !user.faceEncodingVector) {
+    menuItems.push({
+      icon: Camera,
+      label: "Setup Face ID",
+      path: "/dashboard/mark-attendance",
+      roles: ["Student", "Teacher", "Admin", "HOD", "Seller"],
+    });
+  }
+
   const roleSpecificItems = {
     Student: [
-      { icon: Camera, label: "Mark Attendance", path: "/dashboard/mark-attendance" },
-      { icon: UserCheck, label: "Face Setup", path: "/dashboard/register-face" },
+      (user?.faceEncodingVector ? { icon: Camera, label: "Mark Attendance", path: "/dashboard/mark-attendance" } : null),
       { icon: BookOpen, label: "My Curriculum", path: "/dashboard/curriculum" },
-    ],
+    ].filter(Boolean),
     Teacher: [
       {
         icon: ClipboardList,
         label: "Quiz Editor",
         path: "/teacher/quiz-editor",
       },
-      { icon: Camera, label: "Mark Attendance", path: "/dashboard/mark-attendance" },
+      (user?.faceEncodingVector ? { icon: Camera, label: "Mark Attendance", path: "/dashboard/mark-attendance" } : null),
       { icon: BookOpen, label: "Curriculum", path: "/dashboard/curriculum" },
-    ],
+    ].filter(Boolean),
     Admin: [
       {
         icon: ClipboardList,
@@ -299,13 +321,13 @@ const Sidebar = ({ sidebar }) => {
         label: "Quiz Editor",
         path: "/teacher/quiz-editor",
       },
-      { icon: Camera, label: "Mark Attendance", path: "/dashboard/mark-attendance" },
+      (user?.faceEncodingVector ? { icon: Camera, label: "Mark Attendance", path: "/dashboard/mark-attendance" } : null),
       { icon: BookOpen, label: "Curriculum", path: "/dashboard/curriculum" },
       { icon: CheckSquare, label: "Approvals", path: "/user-approvals" },
       { icon: Users, label: "Teachers", path: "/dashboard/teachers" },
       { icon: Activity, label: "Analytics", path: "/dashboard/analytics" },
       { icon: BrainCircuit, label: "Dropout AI", path: "/dashboard/dropout-predict" },
-    ],
+    ].filter(Boolean),
     Seller: []
   };
 
@@ -332,7 +354,7 @@ const Sidebar = ({ sidebar }) => {
   return (
     <UniversalSidebar
       isOpen={sidebar}
-      className={`flex flex-col z-50 shadow-2xl sm:shadow-lg duration-300 sm:m-1 rounded-r-2xl sm:rounded-xl relative h-full sm:h-[calc(100vh-80px)] ${sidebar ? "w-64 sm:w-56 overflow-visible backdrop-blur-xl border-r border-inherit/20 sm:border-none" : "sm:w-16 w-0 overflow-hidden sm:overflow-visible border-transparent"}`}
+      className={`flex flex-col z-50 shadow-2xl sm:shadow-lg duration-300 sm:m-1 rounded-r-2xl sm:rounded-xl relative h-full sm:h-[calc(100vh-80px)] ${getGlassyClasses(isDark)} ${sidebar ? "w-64 sm:w-56 overflow-visible border-r border-white/10 sm:border-none" : "sm:w-16 w-0 overflow-hidden sm:overflow-visible border-transparent"}`}
     >
       {sidebar && (
         <div className="">
@@ -350,10 +372,10 @@ const Sidebar = ({ sidebar }) => {
             <div key={item.path} className="relative w-full">
               <Link
                 to={item.path}
-                className={`flex-wrap ${sidebar ? "flex" : "hidden sm:flex justify-center"} w-full items-center gap-3 px-3 py-3 rounded-lg transition-all hover:no-underline ${
+                className={`sidebar-link flex-wrap ${sidebar ? "flex" : "hidden sm:flex justify-center"} w-full items-center gap-3 px-3 py-3 rounded-lg transition-all hover:no-underline ${
                   active
                     ? "bg-black/10 dark:bg-white/10 font-bold shadow-sm"
-                    : "hover:bg-black/5 dark:hover:bg-white/5 opacity-80 hover:opacity-100"
+                    : `hover:bg-black/5 dark:hover:bg-white/5 opacity-80 hover:opacity-100`
                 }`}
               >
                 <Icon className="w-5 h-5 flex-shrink-0" />
@@ -413,20 +435,38 @@ const Sidebar = ({ sidebar }) => {
 
           {/* Dropdown Menu (Hover Triggered to the right) */}
           <div
-            className={`absolute bottom-0 left-full ml-2 w-48 ${getCardThemeClasses(appTheme)} backdrop-blur-xl rounded-xl shadow-2xl border border-inherit/30 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 origin-bottom-left scale-95 group-hover:scale-100 z-50 overflow-hidden flex flex-col p-1`}
+            className={`absolute bottom-0 left-full ml-2 w-56 ${getCardThemeClasses(appTheme, is3DMode)} backdrop-blur-xl rounded-xl shadow-2xl border border-white/10 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 origin-bottom-left scale-95 group-hover:scale-100 z-50 overflow-hidden flex flex-col p-1`}
           >
-            <div className="px-3 py-2 text-xs font-bold text-inherit opacity-60 uppercase tracking-wider border-b border-inherit/30 mb-1">
-              App Theme
+            <div className="px-3 py-2 text-xs font-bold text-inherit opacity-60 uppercase tracking-wider border-b border-white/10 mb-1">
+              App Appearance
             </div>
-            {THEMES.map((theme) => (
-              <button
-                key={theme.id}
-                onClick={() => setAppTheme(theme.id)}
-                className={`text-left px-3 py-2 text-sm rounded-lg transition-colors ${appTheme === theme.id ? getPrimaryButtonClasses(appTheme) : "text-inherit opacity-80 hover:opacity-100 hover:bg-black/10 dark:hover:bg-white/10"}`}
-              >
-                {theme.name}
-              </button>
-            ))}
+            
+            {/* 3D Mode Toggle inside Theme Selector */}
+            <button
+              onClick={(e) => { e.stopPropagation(); toggle3DMode(); }}
+              className={`flex items-center justify-between px-3 py-2.5 mb-1 rounded-lg text-sm transition-all ${is3DMode ? "bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-500/20" : "hover:bg-white/10 opacity-80"}`}
+            >
+              <div className="flex items-center gap-2">
+                <Box size={14} /> 3D Mode
+              </div>
+              <div className={`w-8 h-4 rounded-full relative transition-colors ${is3DMode ? "bg-white/30" : "bg-white/10"}`}>
+                <div className={`absolute top-1 left-1 w-2 h-2 rounded-full bg-white transition-transform ${is3DMode ? "translate-x-4" : ""}`} />
+              </div>
+            </button>
+
+            <div className="h-px bg-white/10 my-1" />
+
+            <div className="max-h-48 overflow-y-auto custom-scrollbar">
+              {THEMES.map((theme) => (
+                <button
+                  key={theme.id}
+                  onClick={() => setAppTheme(theme.id)}
+                  className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors ${appTheme === theme.id ? "bg-indigo-500/20 text-indigo-400 font-bold" : "text-inherit opacity-80 hover:opacity-100 hover:bg-white/5"}`}
+                >
+                  {theme.name}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>

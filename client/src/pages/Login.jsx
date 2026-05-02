@@ -3,7 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { Lock, AlertCircle, ArrowLeft, KeyRound } from "lucide-react";
 import { useDispatch } from "react-redux";
 import { login } from "@/redux/authSlice";
-import { loginUser, oauthLogin, requestPasswordReset, resetPassword, verifyResetOtp } from "@/services/userService";
+import { loginUser, oauthLogin, requestPasswordReset, resetPassword, verifyResetOtp, verifyOTP, resendVerificationOTP } from "@/services/userService";
 import ErrorAlert from "@/components/ui/ErrorAlert";
 import { useTheme } from "@/context/ThemeContext";
 import { auth } from "@/config/firebase";
@@ -37,6 +37,8 @@ export const Login = () => {
   const [resetToken, setResetToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [resendTimer, setResendTimer] = useState(0);
+  const [unverifiedUserId, setUnverifiedUserId] = useState(null);
+  const [otpCode, setOtpCode] = useState("");
 
   useEffect(() => {
     let timer;
@@ -57,10 +59,16 @@ export const Login = () => {
 
     try {
       const data = await loginUser(formData);
-
+      
+      if (data.requiresOTP) {
+        setUnverifiedUserId(data.userId);
+        setView("verifyEmail");
+        setResendTimer(60);
+        return;
+      }
+      
       // Dispatch Redux action which also handles localStorage automatically
       dispatch(login({ user: data.user, token: data.token }));
-
       navigate("/dashboard");
     } catch (err) {
       console.error("Login failed:", err);
@@ -149,6 +157,36 @@ export const Login = () => {
       setResetToken("");
     } catch (err) {
       setErrorMsg(err.response?.data?.message || "Failed to reset password.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyEmail = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setErrorMsg("");
+    try {
+      await verifyOTP({ email: formData.email, otp: otpCode });
+      window.dispatchEvent(new CustomEvent("showToast", { detail: "Email verified successfully! You can now log in. 🎉" }));
+      setView("login");
+      setOtpCode("");
+    } catch (err) {
+      setErrorMsg(err.response?.data?.message || "Invalid or expired OTP.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendOTP = async () => {
+    if (resendTimer > 0) return;
+    setLoading(true);
+    try {
+      await resendVerificationOTP(unverifiedUserId);
+      setResendTimer(60);
+      window.dispatchEvent(new CustomEvent("showToast", { detail: "New verification code sent! 📧" }));
+    } catch (err) {
+      setErrorMsg(err.response?.data?.message || "Failed to resend OTP.");
     } finally {
       setLoading(false);
     }
@@ -282,6 +320,59 @@ export const Login = () => {
                   style={{ "--s": "15px", "--g": "3px" }}
                 ></div>
               ) : "Reset Password & Login"}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {view === "verifyEmail" && (
+        <form onSubmit={handleVerifyEmail} className={`${getCardThemeClasses(appTheme)} backdrop-blur-xl p-6 sm:p-8 rounded-3xl shadow-2xl border w-full max-w-md flex flex-col gap-4 transition-colors duration-300 animate-in fade-in zoom-in-95`}>
+           <button type="button" onClick={() => setView("login")} className="p-2 hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition-colors opacity-70 hover:opacity-100 -ml-2 -mt-2 w-fit">
+             <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="text-center">
+             <Lock className="w-12 h-12 mx-auto mb-3 opacity-80 text-inherit" />
+             <h2 className="text-2xl font-bold text-inherit mb-2">Verify Your Account</h2>
+             <p className="text-sm opacity-80 font-medium">Please enter the 6-digit code sent to <b>{formData.email}</b> to complete your registration.</p>
+          </div>
+          <ErrorAlert message={errorMsg} />
+          
+          <input
+            type="text"
+            value={otpCode}
+            onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            inputMode="numeric"
+            pattern="[0-9]*"
+            autoComplete="one-time-code"
+            placeholder="6-Digit OTP"
+            maxLength={6}
+            className="w-full text-center text-2xl tracking-[0.5em] font-mono px-3 py-3 border border-inherit/30 rounded-xl bg-black/5 dark:bg-white/5 text-inherit focus:outline-none focus:ring-2 focus:ring-current transition-colors"
+            required
+          />
+
+          <div className="flex gap-4 pt-4">
+            <button
+              type="submit"
+              disabled={loading || otpCode.length < 6}
+              className={`w-full py-2 h-11 rounded-lg font-bold shadow-sm transition-all active:scale-95 disabled:opacity-50 ${getPrimaryButtonClasses(appTheme)}`}
+            >
+              {loading ? (
+                <div
+                  className="loader mx-auto"
+                  style={{ "--s": "15px", "--g": "3px" }}
+                ></div>
+              ) : "Verify & Activate"}
+            </button>
+          </div>
+          
+          <div className="flex flex-col gap-2 items-center mt-4">
+            <button
+              type="button"
+              onClick={handleResendOTP}
+              disabled={resendTimer > 0 || loading}
+              className="text-sm text-blue-500 hover:text-blue-600 font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {resendTimer > 0 ? `Resend Code in ${resendTimer}s` : "Resend Verification Code"}
             </button>
           </div>
         </form>

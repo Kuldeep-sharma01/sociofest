@@ -312,8 +312,11 @@ export const generateMediaContent = async (
   const apiKey = provider === "openai" ? config.openAiKey : provider === "stability" ? config.stabilityKey : provider === "stablediffusion" || provider === "pollinations" ? "local-node" : getAiKey();
   if (!apiKey) throw new Error(`API Key for ${provider.toUpperCase()} is missing.`);
 
+  const PROMPT_SUFFIX = ", natural, realistic, beautiful, ultra hd, 8k resolution, cinematic lighting, photorealistic, intricate details, professional photography, highly detailed, sharp focus, masterpiece, 4k";
+  const enhancedPrompt = `${prompt.trim()}${PROMPT_SUFFIX}`;
+
   const res = await apiClient.post("/ai/media", {
-    provider, apiKey, prompt: `${prompt}, 8K UHD ultra high resolution sharp focus hyper detailed no pixelation`, type, aspectRatio, selectedMedia,
+    provider, apiKey, prompt: enhancedPrompt, type, aspectRatio, selectedMedia,
     sdHost: config.sdHost, ollamaHost: config.ollamaHost,
     autoEnhanceEnabled: localStorage.getItem("aiAutoEnhance") !== "false",
     ollamaModel: localStorage.getItem("ollamaModel") || "llama3"
@@ -321,22 +324,32 @@ export const generateMediaContent = async (
   const data = res.data;
   
   let finalUrl = data.url;
+  let isPermanent = !!data.url;
+
   if (data.base64) {
-     try {
-      // Use a more robust base64 to blob conversion for large files instead of fetch()
-      const split = data.base64.split(',');
-      const mimeString = split[0].match(/:(.*?);/)[1];
-      const byteString = atob(split[1]);
-      const ab = new ArrayBuffer(byteString.length);
-      const ia = new Uint8Array(ab);
-      for (let i = 0; i < byteString.length; i++) {
-        ia[i] = byteString.charCodeAt(i);
+      try {
+        const split = data.base64.split(',');
+        const mimeString = split[0].match(/:(.*?);/)[1];
+        const byteString = atob(split[1]);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) {
+          ia[i] = byteString.charCodeAt(i);
+        }
+        const blob = new Blob([ab], { type: mimeString });
+        const blobUrl = URL.createObjectURL(blob);
+        
+        // ONLY use blob if no permanent URL was provided by the server
+        if (!finalUrl) {
+          finalUrl = blobUrl;
+          isPermanent = false;
+          console.log("Using temporary blob URL for media");
+        } else {
+          console.log("Using permanent cloud URL for media:", finalUrl);
+        }
+      } catch(e) {
+        if (!finalUrl) finalUrl = data.base64;
       }
-      const blob = new Blob([ab], { type: mimeString });
-      finalUrl = URL.createObjectURL(blob);
-     } catch(e) {
-       finalUrl = data.base64; // Fallback to raw base64 if blob conversion fails
-     }
   }
 
   try {
@@ -344,9 +357,10 @@ export const generateMediaContent = async (
     history.unshift({
       id: Date.now().toString(),
       prompt: data.enhancedPrompt || prompt,
-      url: data.base64 || finalUrl,
+      url: finalUrl, // Use the best URL we have (permanent preferred)
       provider: data.provider || provider,
       aspectRatio,
+      isPermanent,
       date: new Date().toISOString()
     });
     if (history.length > 15) history.pop();
@@ -355,10 +369,46 @@ export const generateMediaContent = async (
     console.warn("Failed to save generated image to gallery.", e);
   }
 
-  return { type: data.type, url: finalUrl };
+  // FINAL VALIDATION: Ensure blob URLs are NEVER marked as permanent
+  const finalIsPermanent = isPermanent && !finalUrl.startsWith("blob:");
+
+  return { type: data.type, url: finalUrl, isPermanent: finalIsPermanent };
 };
 
-export const speakText = (text, options = {}) => {
+export const generateSpeech = async (text, voice = 'alloy', provider = 'google_free', speed = 1.0, language = 'en', useUserVoice = false) => {
+  const response = await apiClient.post('/ai/text-to-speech', {
+    text, voice, provider, speed, language, useUserVoice
+  }, { responseType: 'arraybuffer' });
+  
+  const blob = new Blob([response.data], { type: 'audio/mpeg' });
+  return URL.createObjectURL(blob);
+};
+
+export const speakText = async (text, options = {}) => {
+  const config = getAiConfig();
+  const provider = options.provider || config.provider;
+
+  // Use Local AI Backend TTS if requested or if provider is stablediffusion/local
+  if (provider === 'stablediffusion' || provider === 'local' || options.useBackend) {
+    try {
+      const audioUrl = await generateSpeech(
+        text, 
+        options.voice || 'alloy', 
+        options.backendProvider || 'google_free', 
+        options.rate || 1.0, 
+        options.language || 'en',
+        options.useUserVoice
+      );
+      const audio = new Audio(audioUrl);
+      if (options.onEnd) audio.onended = options.onEnd;
+      if (options.onError) audio.onerror = options.onError;
+      audio.play();
+      return;
+    } catch (err) {
+      console.warn("Backend TTS failed, falling back to browser synthesis", err);
+    }
+  }
+
   if ("speechSynthesis" in window) {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);

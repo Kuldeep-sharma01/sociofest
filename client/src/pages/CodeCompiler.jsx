@@ -72,7 +72,10 @@ const CodeCompiler = () => {
       if (deptIdentifier) {
         try {
           const data = await getDepartmentHODKeys(deptIdentifier);
-          if (data.rapidApiKey) {
+          // Priority: 1. Personal Key, 2. Department Key
+          if (data.personalRapidApiKey) {
+            setApiKey(data.personalRapidApiKey);
+          } else if (data.rapidApiKey) {
             setApiKey(data.rapidApiKey);
           }
         } catch (err) {
@@ -85,12 +88,11 @@ const CodeCompiler = () => {
 
   const handleSaveKey = async (key) => {
     setApiKey(key);
-    if (canConfigure) {
-      try {
-        await updateUserProfile(user._id, { rapidApiKey: key });
-      } catch (err) {
-        console.error("Failed to save RapidAPI key", err);
-      }
+    try {
+      await updateUserProfile(user._id, { rapidApiKey: key });
+      window.dispatchEvent(new CustomEvent("showToast", { detail: "API key updated! 🔑" }));
+    } catch (err) {
+      console.error("Failed to save RapidAPI key", err);
     }
   };
 
@@ -171,12 +173,12 @@ const CodeCompiler = () => {
             {apiKey ? (
               <span className="ml-2 px-2 py-0.5 text-xs bg-green-500/20 text-green-100 border border-green-500/30 rounded-full font-medium items-center gap-1.5 tracking-wide uppercase hidden sm:flex">
                 <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></div>{" "}
-                Premium
+                Premium (Cloud)
               </span>
             ) : (
-              <span className="ml-2 px-2 py-0.5 text-xs bg-orange-500/20 text-orange-100 border border-orange-500/30 rounded-full font-medium items-center gap-1.5 tracking-wide uppercase hidden sm:flex">
-                <div className="w-1.5 h-1.5 bg-orange-400 rounded-full"></div>{" "}
-                Free Fallback
+              <span className="ml-2 px-2 py-0.5 text-xs bg-blue-500/20 text-blue-100 border border-blue-500/30 rounded-full font-medium items-center gap-1.5 tracking-wide uppercase hidden sm:flex">
+                <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse"></div>{" "}
+                Local AI Service
               </span>
             )}
           </h1>
@@ -185,31 +187,29 @@ const CodeCompiler = () => {
             your browser.
           </p>
         </div>
-        {canConfigure && (
-          <form onSubmit={(e) => e.preventDefault()} className="w-full md:w-auto flex flex-col gap-2 bg-black/5 dark:bg-white/5 p-4 rounded-xl border border-inherit/30 transition-colors">
-            <label className="text-xs font-semibold opacity-70 text-inherit uppercase tracking-wider">
-              RapidAPI Key (Judge0)
-            </label>
-            <div className="flex relative">
-              <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 opacity-50 text-inherit" />
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                onBlur={(e) => handleSaveKey(e.target.value)}
-                placeholder="Paste API Key here..."
-                onCopy={(e) => e.preventDefault()}
-                onCut={(e) => e.preventDefault()}
-                onContextMenu={(e) => e.preventDefault()}
-                autoComplete="new-password"
-                className="w-full md:w-64 pl-9 pr-3 py-2 bg-black/10 dark:bg-white/10 border border-inherit/50 rounded-lg text-sm focus:outline-none focus:border-current text-inherit select-none transition-colors"
-              />
-            </div>
-            <p className="text-[10px] opacity-50 text-inherit">
-              Auto-saves on blur. Shared with your department.
-            </p>
-          </form>
-        )}
+        <form onSubmit={(e) => e.preventDefault()} className="w-full md:w-auto flex flex-col gap-2 bg-black/5 dark:bg-white/5 p-4 rounded-xl border border-inherit/30 transition-colors">
+          <label className="text-xs font-semibold opacity-70 text-inherit uppercase tracking-wider">
+            {canConfigure ? "RapidAPI Key (Department)" : "RapidAPI Key (Personal)"}
+          </label>
+          <div className="flex relative">
+            <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 opacity-50 text-inherit" />
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              onBlur={(e) => handleSaveKey(e.target.value)}
+              placeholder="Paste API Key here..."
+              onCopy={(e) => e.preventDefault()}
+              onCut={(e) => e.preventDefault()}
+              onContextMenu={(e) => e.preventDefault()}
+              autoComplete="new-password"
+              className="w-full md:w-64 pl-9 pr-3 py-2 bg-black/10 dark:bg-white/10 border border-inherit/50 rounded-lg text-sm focus:outline-none focus:border-current text-inherit select-none transition-colors"
+            />
+          </div>
+          <p className="text-[10px] opacity-50 text-inherit">
+            Auto-saves on blur. {canConfigure ? "Shared with your department." : "Your private key."}
+          </p>
+        </form>
       </div>
 
       {!apiKey && !canConfigure && (
@@ -218,9 +218,9 @@ const CodeCompiler = () => {
           <div>
             <p className="font-bold text-sm">Premium Compiler Offline</p>
             <p className="text-sm mt-1">
-              Your HOD hasn't set a Premium API key. The compiler is currently
-              using slower, free public servers. Some executions might fail
-              during high traffic.
+              No Premium API key set. The compiler is currently using slower,
+              free public servers. Enter your own RapidAPI key above for faster
+              executions.
             </p>
           </div>
         </div>

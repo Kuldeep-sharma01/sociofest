@@ -23,7 +23,10 @@ import { useSocket } from "@/context/SocketContext";
 import { useTheme } from "@/context/ThemeContext";
 import ChatSidebar from "@/components/chat/ChatSidebar";
 import ChatWindow from "@/components/chat/ChatWindow";
-import { getConnections as fetchConnections } from "@/services/connectionService";
+import { 
+  getConnections as fetchConnections,
+  sendConnectionRequest
+} from "@/services/connectionService";
 import { getUserById } from "@/services/userService";
 import UserInfo from "@/components/ui/UserInfo";
 import DocumentViewer from "@/components/ui/DocumentViewer";
@@ -352,6 +355,8 @@ const Chat = () => {
           String(c._id) === String(selectedUser._id) ? { ...c, unread: 0 } : c,
         ),
       );
+      // Notify Global Sidebar to refresh its unread count
+      window.dispatchEvent(new Event("messagesRead"));
     }
   }, [selectedUser]);
 
@@ -471,7 +476,7 @@ const Chat = () => {
       if (isMounted) setLoadingUsers(true);
       try {
         const res = await searchUsers("");
-        if (isMounted) setUsers(res);
+        if (isMounted) setUsers(res.users || res);
       } catch (err) {
         console.error("Failed to fetch users", err);
       } finally {
@@ -491,7 +496,7 @@ const Chat = () => {
         setLoadingUsers(true);
         try {
           const res = await searchUsers(searchQuery);
-          setUsers(res);
+          setUsers(res.users || res);
         } catch (error) {
           console.error("Search failed:", error);
         } finally {
@@ -501,7 +506,7 @@ const Chat = () => {
         // Reload default list if search cleared
         try {
           const res = await searchUsers("");
-          setUsers(Array.isArray(res) ? res : []);
+          setUsers(res.users || (Array.isArray(res) ? res : []));
         } catch (error) {
           console.error("Search failed:", error);
         }
@@ -1122,6 +1127,20 @@ const Chat = () => {
     }
   };
 
+  const handleConnect = async (userId) => {
+    try {
+      await sendConnectionRequest(userId);
+      window.dispatchEvent(new CustomEvent("showToast", { 
+        detail: "Connection request sent! 🚀" 
+      }));
+    } catch (err) {
+      console.error("Failed to connect", err);
+      window.dispatchEvent(new CustomEvent("showToast", { 
+        detail: "Failed to send request. ❌" 
+      }));
+    }
+  };
+
   const handleMultiDelete = async () => {
     if (!window.confirm(`Delete ${selectedMessages.length} messages?`)) return;
     setMessages((prev) =>
@@ -1329,6 +1348,7 @@ const Chat = () => {
         setSearchParams={setSearchParams}
         setShowCreateGroupModal={setShowCreateGroupModal}
         blockedUsers={blockedUsers}
+        handleConnect={handleConnect}
       />
       <ChatWindow
         showChat={showChat}

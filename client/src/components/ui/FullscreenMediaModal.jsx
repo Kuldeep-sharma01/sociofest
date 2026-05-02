@@ -1390,7 +1390,35 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
 
   // Add ESC key and video shortcuts listener
   useEffect(() => {
+    // Accessibility: Auto-focus the close button or container on open
+    const timer = setTimeout(() => {
+       const closeBtn = containerRef.current?.querySelector('button[title*="Close"]');
+       if (closeBtn) closeBtn.focus();
+       else containerRef.current?.focus();
+    }, 100);
+
     const handleKeyDown = (e) => {
+      // Accessibility: Focus Trap logic
+      if (e.key === "Tab" && containerRef.current) {
+        const focusableElements = containerRef.current.querySelectorAll(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === firstElement) {
+            lastElement.focus();
+            e.preventDefault();
+          }
+        } else {
+          if (document.activeElement === lastElement) {
+            firstElement.focus();
+            e.preventDefault();
+          }
+        }
+      }
+
       // PREVENT KEYBOARD HIJACKING WHEN TYPING IN INPUTS
       const activeTag = document.activeElement.tagName;
       if (
@@ -3595,7 +3623,7 @@ localStreamRef.current = stream;
       {/* Help / Documentation Panel */}
       {showHelp && !isLocked && (
         <div
-          className={`absolute top-20 left-1/2 -translate-x-1/2 backdrop-blur-xl p-6 rounded-2xl shadow-2xl z-[100] w-[90vw] max-w-2xl max-h-[70vh] overflow-y-auto animate-in zoom-in-95 border ${getPanelTheme(appTheme)}`}
+          className={`absolute top-20 left-1/2 -translate-x-1/2 backdrop-blur-xl p-6 rounded-2xl shadow-2xl z-[20000] w-[90vw] max-w-2xl max-h-[70vh] overflow-y-auto animate-in zoom-in-95 border ${getPanelTheme(appTheme)}`}
           onWheel={(e) => e.stopPropagation()}
           onPointerDown={(e) => e.stopPropagation()}
         >

@@ -19,7 +19,7 @@ import {
   Clock,
   Trophy,
   Award,
-  Briefcase, Edit, Camera, Sparkles
+  Briefcase, Edit, Camera, Sparkles, MapPin, Phone, Calendar
 } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { updateUser as updateAuthUser } from "@/redux/authSlice";
@@ -270,7 +270,26 @@ const HODDashboard = ({ userId, isViewingOther, targetUser }) => {
           <InfoItem icon={Trophy} label="Achievements" value={hodData?.achievements || "N/A"} colorClass="text-current opacity-80" />
           <InfoItem icon={Award} label="Qualifications" value={teacherData?.qualifications || "N/A"} colorClass="text-current opacity-80" />
           <InfoItem icon={Briefcase} label="Experience" value={teacherData?.experience ? `${teacherData.experience} years` : "N/A"} colorClass="text-current opacity-80" />
+          {details?.location && <InfoItem icon={MapPin} label="Location" value={details.location} colorClass="text-current opacity-80" />}
+          {details?.contactNumber && <InfoItem icon={Phone} label="Contact" value={details.contactNumber} colorClass="text-current opacity-80" />}
+          {details?.dob && <InfoItem icon={Calendar} label="Birthday" value={new Date(details.dob).toLocaleDateString()} colorClass="text-current opacity-80" />}
         </div>
+        {details?.bio && (
+          <div className="mt-4 pt-4 border-t border-inherit/30">
+            <h4 className="text-sm font-bold opacity-80 mb-1 text-inherit">Bio</h4>
+            <p className="text-inherit font-medium">{details.bio}</p>
+          </div>
+        )}
+        {details?.skills?.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-inherit/30">
+            <h4 className="text-sm font-bold opacity-80 mb-2 text-inherit">Skills</h4>
+            <div className="flex flex-wrap gap-2">
+              {details.skills.map((skill, i) => (
+                <span key={i} className="px-3 py-1 bg-black/5 dark:bg-white/5 border border-inherit/30 text-inherit text-sm font-medium rounded-full">{skill}</span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Subject Management Section */}

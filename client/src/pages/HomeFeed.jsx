@@ -807,7 +807,6 @@ const HomeFeed = () => {
   ========================= */
   return (
     <>
-      {!user && <Welcome />}
       <div
         ref={homeFeedRef}
         className="relative flex flex-col mx-auto bg-transparent w-full h-full transition-colors"

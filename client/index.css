@@ -206,3 +206,120 @@ body,
     @apply text-blue-600 hover:underline;
   }
 }
+
+/* --- Premium Skeuomorphic 3D Utilities --- */
+.is-3d-mode {
+  --three-d-lift: -6px;
+  --three-d-press: 2px;
+}
+
+/* Stable containers that shouldn't tilt or lift */
+.no-3d, 
+.is-3d-mode nav, 
+.is-3d-mode .no-3d {
+  transform: none !important;
+  box-shadow: none !important;
+  perspective: none !important;
+}
+
+/* Real 3D Buttons */
+.is-3d-mode button:not(.no-3d),
+.is-3d-mode .btn-3d {
+  position: relative;
+  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transform-style: preserve-3d;
+  box-shadow: 
+    0 4px 0 rgba(0,0,0,0.2),
+    0 8px 15px rgba(0,0,0,0.1);
+}
+
+.is-3d-mode button:not(.no-3d):hover,
+.is-3d-mode .btn-3d:hover {
+  transform: translateY(-2px);
+  box-shadow: 
+    0 4px 0 rgba(0,0,0,0.15),
+    0 8px 12px rgba(0,0,0,0.1);
+  z-index: 10;
+}
+
+.is-3d-mode button:not(.no-3d):active,
+.is-3d-mode .btn-3d:active {
+  transform: translateY(1px);
+  box-shadow: 
+    0 1px 0 rgba(0,0,0,0.2),
+    0 2px 5px rgba(0,0,0,0.1);
+}
+
+/* Real 3D Cards with Perspective */
+.is-3d-mode .card-3d,
+.is-3d-mode [class*="bg-white"],
+.is-3d-mode [class*="bg-gray-800"],
+.is-3d-mode [class*="bg-slate-900"] {
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s ease;
+  transform-style: preserve-3d;
+  perspective: 1000px;
+}
+
+.is-3d-mode .card-3d:hover,
+.is-3d-mode [class*="bg-white"]:hover,
+.is-3d-mode [class*="bg-gray-800"]:hover,
+.is-3d-mode [class*="bg-slate-900"]:hover {
+  transform: translateY(-3px) rotateX(1.5deg) rotateY(1deg);
+  box-shadow: 
+    -2px 8px 20px -10px rgba(0,0,0,0.15),
+    0 0 10px rgba(99,102,241,0.03);
+  z-index: 50;
+  position: relative;
+}
+
+/* Prevent nested double-lifting and clipping */
+.is-3d-mode *:hover > button,
+.is-3d-mode *:hover > [role="button"],
+.is-3d-mode *:hover > a {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.is-3d-mode .card-3d,
+.is-3d-mode [class*="bg-white"],
+.is-3d-mode [class*="bg-gray-800"],
+.is-3d-mode [class*="bg-slate-900"] {
+  overflow: visible !important; /* Allow 3D depth to pop out */
+}
+
+/* Individual Element Depth */
+.is-3d-mode .depth-1, .translate-z-10 { transform: translateZ(10px); }
+.is-3d-mode .depth-2, .translate-z-20 { transform: translateZ(25px); }
+.is-3d-mode .depth-3, .translate-z-50 { transform: translateZ(50px); }
+
+/* Remove the vignette/overlay from previous attempt */
+.is-3d-mode .perspective-2000px { perspective: none; }
+
+/* 3D Sidebar Links Refinement */
+.is-3d-mode .sidebar-link {
+  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), background 0.2s ease;
+}
+
+.is-3d-mode .sidebar-link:hover {
+  transform: translateX(4px) translateZ(10px);
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Ensure containers don't clip 3D elements, but allow mobile scrolling where legitimate */
+.is-3d-mode .min-h-screen,
+.is-3d-mode .flex-1 {
+  overflow-x: hidden;
+}
+
+/* On mobile, explicitly allow root overflow to prevent suppressing legitimate scrolling */
+@media (max-width: 768px) {
+  .is-3d-mode #root {
+    overflow-x: auto !important;
+  }
+}
+
+/* Accessibility: Clear Focus for 3D buttons */
+.is-3d-mode button:focus-visible {
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.4), 0 4px 0 rgba(0,0,0,0.2);
+}
+

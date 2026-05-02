@@ -26,21 +26,87 @@ export const defaultSystemSettings = {
     mediaPlayerFallbackEnabled: true,
     documentViewerFallbackEnabled: true,
     mobileSafeModeEnabled: true,
+    compilerEnabled: true,
+    marketplaceEnabled: true,
+    chatEnabled: true,
+    quizEnabled: true,
+    attendanceEnabled: true,
+    notificationsEnabled: true,
+  },
+  aiModelConfig: {
+    chat: [
+      { provider: "deepseek", model: "deepseek-chat", enabled: true, timeoutMs: 20000 },
+      { provider: "openrouter", model: "meta-llama/llama-3-8b-instruct:free", enabled: true, timeoutMs: 25000 },
+    ],
+    media: [
+      { provider: "openai", model: "gpt-4o-mini", enabled: true, timeoutMs: 30000 },
+    ],
+    apiKeys: {
+      openai: "",
+      deepseek: "",
+      openrouter: "",
+      gemini: "",
+    },
+  },
+  cloudStorage: {
+    activeProvider: "local",
+    maxUploadSizeMB: 100,
+    allowedFileTypes: ["image/*", "video/*", "audio/*", "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.*"],
+    local: { enabled: true, uploadDir: "uploads" },
+    s3: { enabled: false, bucket: "", region: "", accessKeyId: "", secretAccessKey: "" },
+    cloudinary: { enabled: false, cloudName: "", apiKey: "", apiSecret: "" },
+    googleDrive: { enabled: false, folderId: "", serviceAccountKey: "" },
+  },
+  rateLimits: {
+    global: { windowMs: 900000, max: 300 },
+    auth: { windowMs: 900000, max: 20 },
+    ai: { windowMs: 60000, max: 10 },
+    upload: { windowMs: 60000, max: 30 },
+    messages: { windowMs: 60000, max: 60 },
+    compiler: { windowMs: 900000, max: 50 },
+    admin: { windowMs: 900000, max: 30 },
+    export: { windowMs: 900000, max: 5 },
+  },
+  accessControl: {
+    allowedRoles: ["Student", "Teacher", "HOD", "Admin", "Seller"],
+    defaultNewUserRole: "Student",
+    requireApproval: true,
+    maxLoginAttempts: 5,
+    lockoutDurationMinutes: 30,
+    sessionTimeoutMinutes: 1440,
+    allowGoogleAuth: true,
+    corsAllowedOrigins: [],
   },
 };
 
-const mergeSettings = (base, incoming) => ({
-  ...base,
-  ...incoming,
-  emailSettings: {
-    ...base.emailSettings,
-    ...(incoming?.emailSettings || {}),
-  },
-  serviceControls: {
-    ...base.serviceControls,
-    ...(incoming?.serviceControls || {}),
-  },
-});
+const deepMerge = (base, incoming) => {
+  if (!incoming || typeof incoming !== "object") return base;
+  const result = { ...base };
+  for (const key of Object.keys(base)) {
+    if (incoming[key] === undefined) continue;
+    if (
+      typeof base[key] === "object" &&
+      base[key] !== null &&
+      !Array.isArray(base[key]) &&
+      typeof incoming[key] === "object" &&
+      incoming[key] !== null &&
+      !Array.isArray(incoming[key])
+    ) {
+      result[key] = deepMerge(base[key], incoming[key]);
+    } else {
+      result[key] = incoming[key];
+    }
+  }
+  // preserve any extra keys from incoming that aren't in base
+  for (const key of Object.keys(incoming)) {
+    if (!(key in base)) {
+      result[key] = incoming[key];
+    }
+  }
+  return result;
+};
+
+const mergeSettings = (base, incoming) => deepMerge(base, incoming);
 
 export const readSystemSettings = async () => {
   try {

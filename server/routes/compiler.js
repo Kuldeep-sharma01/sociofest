@@ -4,7 +4,7 @@ import { compileCode } from '../controllers/compilerController.js';
 
 const router = express.Router();
 
-router.post('/compile', compileCode);
+router.post('/compile', authenticate, compileCode);
 
 export default router;
 

@@ -40,6 +40,7 @@ const getApiKey = (provider) => {
     deepseek: process.env.DEEPSEEK_API_KEY,
     openrouter: process.env.OPENROUTER_API_KEY,
     gemini: process.env.GEMINI_API_KEY,
+    ollama: process.env.OLLAMA_HOST || "http://127.0.0.1:11434",
   };
   return keyMap[provider];
 };
@@ -107,6 +108,24 @@ const callProvider = async (node, payload, signal) => {
       },
     );
     return res.data?.choices?.[0]?.message?.content || "";
+  }
+
+  if (node.provider === "ollama") {
+    const ollamaHost = getApiKey("ollama");
+    const res = await axios.post(
+      `${ollamaHost}/api/chat`,
+      {
+        model: node.model,
+        messages: payload.messages.map(m => ({ role: m.role === 'ai' ? 'assistant' : m.role, content: m.content || m.text })),
+        stream: false
+      },
+      {
+        headers: { "Content-Type": "application/json" },
+        timeout: timeoutMs,
+        signal,
+      },
+    );
+    return res.data?.message?.content || "";
   }
 
   throw new Error(`unsupported_provider:${node.provider}`);

@@ -201,6 +201,7 @@ const StudentDashboard = ({ userId, isViewingOther, targetUser }) => {
         gradientClass="from-blue-600 to-indigo-700"
       />
 
+
       {/* --- NEW Profile Header --- */}
       <div className={`p-6 md:p-8 rounded-3xl shadow-sm border transition-colors ${getCardThemeClasses(appTheme)}`}>
         <div className="flex items-center justify-between mb-6">
@@ -269,6 +270,29 @@ const StudentDashboard = ({ userId, isViewingOther, targetUser }) => {
         handleDownloadCertificate={handleDownloadCertificate}
         loading={loading}
       />
+
+      {/* --- CRITICAL ACTION: Face Registration --- */}
+      {!isViewingOther && !authUser?.isFaceRegistered && !details?.isFaceRegistered && (
+        <div className={`p-6 rounded-3xl border-2 border-dashed border-blue-500/50 bg-blue-500/10 flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl animate-pulse hover:animate-none transition-all duration-500`}>
+          <div className="flex items-center gap-5 text-center md:text-left">
+            <div className="p-4 bg-blue-500 text-white rounded-2xl shadow-lg shadow-blue-500/30">
+              <Camera className="w-10 h-10" />
+            </div>
+            <div>
+              <h3 className="text-xl md:text-2xl font-black text-blue-700 dark:text-blue-400">Action Required: Setup Face ID</h3>
+              <p className="text-sm md:text-base font-bold opacity-80 text-blue-800 dark:text-blue-300 mt-1">
+                You haven't registered your face yet. Setup your biometric profile to start marking AI attendance.
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={() => navigate('/dashboard/mark-attendance')}
+            className="w-full md:w-auto px-8 py-4 bg-blue-600 text-white font-black rounded-2xl hover:bg-blue-700 shadow-2xl shadow-blue-600/40 transition-all hover:scale-105 active:scale-95 text-lg"
+          >
+            Register Now
+          </button>
+        </div>
+      )}
     </div>
   );
 };

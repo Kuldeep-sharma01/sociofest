@@ -38,7 +38,7 @@ export {
 } from './textUtils';
 
 // ==================== CONSTANTS ====================
-export { API_URL, VITE_PYTHON_API_URL, SD_API_URL } from './constants';
+export { API_URL, PYTHON_API_URL, SD_API_URL } from '@/config/constants';
 
 /**
  * UTILS ORGANIZATION REFERENCE

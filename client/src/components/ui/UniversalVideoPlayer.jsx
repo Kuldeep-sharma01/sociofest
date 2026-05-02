@@ -27,17 +27,10 @@ const UniversalVideoPlayer = forwardRef(({
     getPublicSystemSettings().catch(() => {});
 
     const cleanUrl = url.split("?")[0];
-    const optUrl = cleanUrl.startsWith("blob:") ? url : cleanUrl.replace(/\.[^/.]+$/, "_opt.mp4");
+    const manifestUrl = !cleanUrl.startsWith("blob:") ? cleanUrl.replace(/\.[^/.]+$/, "_manifest.json") : null;
+    
     let hlsInstance = null;
-    const hlsUrl = !cleanUrl.startsWith("blob:")
-      ? cleanUrl.replace(/\.[^/.]+$/, "_hls/master.m3u8")
-      : null;
-
-    const errorListener = () => {
-      if (video.src && video.src.includes("_opt.mp4")) {
-        video.src = url;
-      }
-    };
+    let manifestData = null;
 
     const handleTimeUpdate = () => {
       if (video.currentTime > 0.8 && !video.paused) {
@@ -82,39 +75,25 @@ const UniversalVideoPlayer = forwardRef(({
       }
     };
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            entry.target.play().catch(() => {});
+    const initPlayer = async () => {
+      // 1. Try to load manifest for advanced features
+      if (manifestUrl) {
+        try {
+          const mRes = await fetch(manifestUrl);
+          if (mRes.ok) manifestData = await mRes.json();
+        } catch (e) {}
+      }
+
+      const hlsUrl = !cleanUrl.startsWith("blob:") ? cleanUrl.replace(/\.[^/.]+$/, "_hls/master.m3u8") : null;
+
+      if (!fallbacksEnabled) {
+        video.src = url;
+      } else {
+        // If we have HLS and it's supported, use it for adaptive bitrate
+        if (hlsUrl) {
+          if (video.canPlayType("application/vnd.apple.mpegurl")) {
+            video.src = hlsUrl;
           } else {
-            entry.target.pause();
-          }
-        });
-      },
-      { threshold: 0.5 },
-    );
-
-    if (!fallbacksEnabled) {
-      video.src = url;
-    } else {
-      video.addEventListener("error", errorListener);
-      video.src = optUrl;
-
-      if (hlsUrl) {
-        if (video.canPlayType("application/vnd.apple.mpegurl")) {
-          video.src = hlsUrl;
-          video.addEventListener(
-            "error",
-            () => {
-              if (video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) {
-                video.src = optUrl;
-              }
-            },
-            { once: true },
-          );
-        } else {
-          (async () => {
             try {
               const Hls = await (async () => {
                 if (window.Hls) return window.Hls;
@@ -133,28 +112,32 @@ const UniversalVideoPlayer = forwardRef(({
                   if (data.fatal) {
                     hlsInstance.destroy();
                     hlsInstance = null;
-                    video.src = optUrl;
+                    video.src = url;
                   }
                 });
+              } else {
+                video.src = url;
               }
             } catch {
-              video.src = optUrl;
+              video.src = url;
             }
-          })();
+          }
+        } else {
+          video.src = url;
         }
+
+        video.addEventListener("timeupdate", handleTimeUpdate);
       }
-      video.addEventListener("timeupdate", handleTimeUpdate);
-    }
+    };
+
+    initPlayer();
 
     video.addEventListener("fullscreenchange", handleFullscreenChange);
-    observer.observe(video);
 
     return () => {
       if (hlsInstance) hlsInstance.destroy();
       video.removeEventListener("fullscreenchange", handleFullscreenChange);
       video.removeEventListener("timeupdate", handleTimeUpdate);
-      video.removeEventListener("error", errorListener);
-      observer.unobserve(video);
     };
   }, [url, setFullscreenMedia, mediaData]);
 

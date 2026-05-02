@@ -28,7 +28,7 @@ const YouTubePlayer = ({ url, className = "" }) => {
     // Append standardized player parameters ONLY for YouTube
     try {
       const urlObj = new URL(iframeUrl);
-      urlObj.searchParams.set("autoplay", "1");
+      urlObj.searchParams.set("autoplay", "0");
       urlObj.searchParams.set("controls", "1");
       urlObj.searchParams.set("fs", "1"); // Fullscreen button
       urlObj.searchParams.set("rel", "0"); // Hide related videos

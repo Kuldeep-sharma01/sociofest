@@ -51,6 +51,18 @@ const DepartmentSchema = new mongoose.Schema(
         ref: "Subject",
       },
     ],
+    latitude: {
+      type: Number,
+      default: null
+    },
+    longitude: {
+      type: Number,
+      default: null
+    },
+    allowedRadius: {
+      type: Number,
+      default: 500 // 500 meters default
+    }
   },
   { timestamps: true },
 );

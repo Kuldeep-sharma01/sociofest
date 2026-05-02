@@ -5,10 +5,7 @@ services:
     build:
       context: ./client
       args:
-        - VITE_CLIENT_URL=/api
-        - PYTHON_API_URL=/python-api
-        - VITE_VOICE_API_URL=/voice-api
-        - VITE_SD_API_URL=/sd-api
+        # Behind nginx, client uses relative paths — nginx proxies to services
     container_name: sociofest-nginx
     ports:
       - "80:80"
@@ -30,9 +27,10 @@ services:
       - MONGODB_URI=${MONGODB_URI} # External Atlas connection string
       - REDIS_URL=${REDIS_URL}
       - NODE_ENV=production
-      - PYTHON_API_URL=http://python-service:5001
+      - PYTHON_URL=http://python-service:5001
       - VOICE_AI_URL=http://voice-ai:8000
-      - VITE_CLIENT_URL=${VITE_CLIENT_URL} # Cloud domain
+      - CUSTOM_AI_URL=http://voice-ai:8000/clone-voice
+      - FRONTEND_URL=${FRONTEND_URL} # Cloud domain
     volumes:
       - backend_uploads:/app/uploads
     restart: unless-stopped
@@ -47,6 +45,8 @@ services:
     container_name: sociofest-python
     environment:
       - MONGODB_URI=${MONGODB_URI}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - JWT_SECRET=${JWT_SECRET}
     volumes:
       - python_models:/app/model_cache
     restart: unless-stopped
@@ -55,11 +55,14 @@ services:
     secrets:
       - db_password
 
+  # Voice AI — optional, enable with: --profile voice
   voice-ai:
     build:
       context: ./server/python_modules
       dockerfile: Dockerfile.voice
     container_name: sociofest-voice
+    profiles:
+      - voice
     restart: unless-stopped
     networks:
       - sociofest-net

@@ -64,7 +64,7 @@ import DocumentViewer from "@/components/ui/DocumentViewer";
 import { useSearchParams } from "react-router-dom";
 import ShareModal from "@/components/ui/ShareModal";
 import { getConversations, sendMessage } from "@/services/chatService";
-import { getServiceStatus } from "@/services/aiService";
+import { getServiceStatus, getPythonHealth, toggleHardware } from "@/services/aiService";
 import { useMicVolume } from "@/hooks/useMicVolume";
 import {
   getWrapperThemeClasses,
@@ -309,11 +309,23 @@ const [sessions, setSessions] = useState(() => {
   const [autoSpeak, setAutoSpeak] = useState(
     localStorage.getItem("aiAutoSpeak") === "true",
   );
+  const [useClonedVoice, setUseClonedVoice] = useState(
+    localStorage.getItem("aiUseClonedVoice") === "true",
+  );
   const autoSpeakRef = useRef(autoSpeak);
   useEffect(() => {
     autoSpeakRef.current = autoSpeak;
     localStorage.setItem("aiAutoSpeak", autoSpeak);
   }, [autoSpeak]);
+  
+  useEffect(() => {
+    localStorage.setItem("aiUseClonedVoice", useClonedVoice);
+  }, [useClonedVoice]);
+
+  const [aiHardware, setAiHardware] = useState(localStorage.getItem("aiHardware") || "cpu");
+  const [cudaAvailable, setCudaAvailable] = useState(false);
+  const [hardwareBusy, setHardwareBusy] = useState(false);
+
   const [textSize, setTextSize] = useState(
     localStorage.getItem("aiTextSize") || "text-base",
   );
@@ -462,6 +474,14 @@ useEffect(() => {
         const data = await getServiceStatus();
         if (!active) return;
         setServiceStatus(data?.status === "online" ? "online" : "offline");
+        
+        // Also check Python specific hardware status
+        const pyHealth = await getPythonHealth();
+        if (active && pyHealth) {
+          setAiHardware(pyHealth.device);
+          setCudaAvailable(pyHealth.cuda_available);
+          localStorage.setItem("aiHardware", pyHealth.device);
+        }
       } catch (err) {
         if (active) setServiceStatus("offline");
       }
@@ -681,25 +701,32 @@ const handleChatScroll = useCallback(() => {
       const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
       const scrollY = scrollTop;
       
-      // FIX 1: Update ref BEFORE check to avoid race condition
+      // FIX 1: Update ref and track delta to prevent jitter/glitches
       const prevScrollY = prevScrollYRef.current;
-      
-      // Update ref early to prevent next frame issues
+      const scrollDelta = scrollY - prevScrollY;
       prevScrollYRef.current = scrollY;
-      const scrollingDown = scrollY > prevScrollY + 10; // Higher threshold prevents jitter
       
       // Existing scroll-to-bottom button
       const isNearBottom = scrollHeight - scrollTop - clientHeight <= 150;
       setShowScrollButton(!isNearBottom);
       
-      // Landscape header/sidebar hiding - only hide if scrolled significantly and away from top
+      // Landscape header/sidebar hiding - Smart persistent state
       if (window.innerWidth >= 1024) {
-        const atTop = scrollY < 50;
-        // Only hide when actively scrolling down away from top (not on initial load)
-        const shouldHide = scrollingDown && !atTop && prevScrollY > 50;
-        
-        setIsHeaderHidden(shouldHide);
-        setIsSidebarHidden(shouldHide);
+        if (scrollY < 50) {
+          // Always show at top
+          setIsHeaderHidden(false);
+          setIsSidebarHidden(false);
+        } else if (scrollDelta > 15) {
+          // Scrolling down significantly - hide
+          setIsHeaderHidden(true);
+          setIsSidebarHidden(true);
+        } else if (scrollDelta < -25) {
+          // Scrolling up significantly - show
+          // Using a higher threshold for showing prevents accidental triggers
+          setIsHeaderHidden(false);
+          setIsSidebarHidden(false);
+        }
+        // If delta is small or 0, maintain current state (prevents stop-scroll flicker)
       }
     });
   }, []);
@@ -810,13 +837,23 @@ const handleChatScroll = useCallback(() => {
         ...session,
         messages: session.messages.map(msg => {
           const safeMsg = { ...msg };
+          // User attachments (usually blobs or large base64)
           if (safeMsg.mediaUrls) {
             safeMsg.mediaUrls = safeMsg.mediaUrls.map(url => 
-              (url && (url.length > 2000 || url.startsWith("blob:"))) ? 'https://placehold.co/600x400/1a1a1a/ffffff?text=Image+Expired' : url
+              (url && (url.length > 20000 || url.startsWith("blob:"))) ? 'https://placehold.co/600x400/1a1a1a/ffffff?text=Attachment+Expired' : url
             );
           }
-          if (safeMsg.generatedMediaUrl && (safeMsg.generatedMediaUrl.length > 2000 || safeMsg.generatedMediaUrl.startsWith("blob:"))) {
-             safeMsg.generatedMediaUrl = 'https://placehold.co/1024x1024/1a1a1a/ffffff?text=Generated+Image+Expired';
+          // AI generated media - BE GENTLE: Only expire if it's a massive base64 string or a blob
+          // Permanent URLs (like /python-api/media/download/...) are short and should PERSIST.
+          if (safeMsg.generatedMediaUrl) {
+             const url = safeMsg.generatedMediaUrl;
+             const isTemporary = url.startsWith("blob:") || url.startsWith("data:") || url.length > 2000000;
+             
+             // NEVER save blob: URLs to the database, they will be broken on reload.
+             // If it's a blob and marked permanent, something is wrong, fallback to expired.
+             if (url.startsWith("blob:") || (isTemporary && !safeMsg.isPermanent)) {
+                safeMsg.generatedMediaUrl = 'https://placehold.co/1024x1024/1a1a1a/ffffff?text=Generated+Media+Expired';
+             }
           }
           return safeMsg;
         })
@@ -952,11 +989,12 @@ const handleChatScroll = useCallback(() => {
 
     const mediaToSend = [...attachments];
 
-    setAttachments([]);
+    // ✅ UX FIX: Don't clear attachments yet, wait for successful handoff to production pipeline
+    // setAttachments([]); 
 
     saveHistoryToDB(updatedSessions);
 
-    const timeoutMs = generationMode === "video" ? 240000 : 90000; // 4 mins for video, 90s for chat/images
+    const timeoutMs = generationMode === "video" ? 240000 : 90000; 
     abortControllerRef.current = new AbortController();
     const timeoutId = setTimeout(() => {
       if (abortControllerRef.current) abortControllerRef.current.abort();
@@ -967,7 +1005,6 @@ const handleChatScroll = useCallback(() => {
         const genType = generationMode;
         let prompt = userText.trim() || `Generate ${genType} from attached media`;
         
-        // Append explicit formatting tags so the backend parses them correctly for precise control
         if (genType === "image") {
            prompt += ` --ar ${aspectRatio} --enhance ${autoEnhance}`;
         }
@@ -997,13 +1034,22 @@ const handleChatScroll = useCallback(() => {
 
         const media = await Promise.race([mediaPromise, timeoutPromise]);
 
+        // ✅ Clear attachments ONLY after successful production
+        setAttachments([]);
+
+        const expiryNote = media.isPermanent 
+          ? "*(Note: This file is stored in your permanent cloud storage and will persist across reloads.)*"
+          : "*(Note: This high-quality file is temporary and will expire on reload to save database space. Right-click to save!)*";
+
         const aiMsg = {
           id: Date.now().toString() + "-ai-media",
           role: "ai",
-          text: `**Generated Media for:** "${prompt}"\n\n*(Note: These high-quality files are temporary and will expire on reload to save database space. Right-click to save!)*`,
+          text: `**Generated Media for:** "${prompt}"\n\n${expiryNote}`,
           provider,
           generatedMediaUrl: media.url,
           generatedMediaType: media.type,
+          // FINAL VALIDATION: Ensure blob URLs are NEVER marked as permanent
+          isPermanent: media.isPermanent && !media.url.startsWith("blob:")
         };
 
         const finalMessages = [...newMessages, aiMsg];
@@ -1013,12 +1059,17 @@ const handleChatScroll = useCallback(() => {
         setSessions(finalSessions);
         saveHistoryToDB(finalSessions);
       } else {
+        // Chat mode
         const response = await generateContent(
           newMessages,
           undefined,
           mediaToSend,
           abortControllerRef.current.signal,
         );
+
+        // ✅ Clear attachments after handoff to chat completion
+        setAttachments([]);
+
         const aiMsgId = Date.now().toString() + "-ai";
         const aiMsg = { id: aiMsgId, role: "ai", text: response, provider };
         const finalMessages = [...newMessages, aiMsg];
@@ -1203,6 +1254,8 @@ const handleChatScroll = useCallback(() => {
       const textToSpeak = text.slice(offset);
       speakText(textToSpeak, {
         rate,
+        useBackend: useClonedVoice,
+        useUserVoice: useClonedVoice,
         onBoundary: (e) => {
           if (e.name === "word") {
             setSpeakingState((prev) => ({
@@ -1241,7 +1294,7 @@ const handleChatScroll = useCallback(() => {
         },
       });
     },
-    [],
+    [useClonedVoice],
   );
 
   const toggleVoice = (text, msgId, isLiveMode = false) => {
@@ -1504,7 +1557,7 @@ const handleChatScroll = useCallback(() => {
     sticky top-0 z-20 shrink-0
     transition-all duration-500 ease-in-out
     overflow-hidden
-    ${isHeaderHidden ? "max-h-0 opacity-0 pointer-events-none" : " opacity-100"}
+    ${isHeaderHidden ? "max-h-0 opacity-0 pointer-events-none" : "max-h-[200px] opacity-100"}
   `}
 >
   {/* Actual Header */}
@@ -1822,13 +1875,29 @@ const handleChatScroll = useCallback(() => {
                 AI will automatically read its messages aloud.
               </p>
 
+              <label className="flex text-sm font-bold opacity-90 mb-2 items-center justify-between gap-2 cursor-pointer group">
+                <div className="flex items-center gap-2">
+                  <Mic className="w-4 h-4" /> Use My Cloned Voice
+                </div>
+                <input
+                  type="checkbox"
+                  checked={useClonedVoice}
+                  onChange={(e) => setUseClonedVoice(e.target.checked)}
+                  className="w-4 h-4 accent-current cursor-pointer"
+                />
+              </label>
+              <p className="text-[10px] opacity-70 mb-4">
+                Use your custom voice profile from Security settings.
+              </p>
+
               <label className="block text-sm font-bold opacity-90 mb-2 flex items-center gap-2">
-                <Mic className="w-4 h-4" /> AI Voice
+                <Mic className="w-4 h-4" /> Browser Voice
               </label>
               <select
                 value={voiceURI}
                 onChange={handleVoiceChange}
-                className="w-full p-2.5 rounded-lg border border-inherit bg-black/5 dark:bg-white/5 text-inherit focus:ring-2 focus:ring-current outline-none font-medium text-sm"
+                disabled={useClonedVoice}
+                className={`w-full p-2.5 rounded-lg border border-inherit bg-black/5 dark:bg-white/5 text-inherit focus:ring-2 focus:ring-current outline-none font-medium text-sm ${useClonedVoice ? 'opacity-50' : ''}`}
               >
                 <option value="">System Default</option>
                 {voices.map((v) => (
@@ -1861,6 +1930,62 @@ const handleChatScroll = useCallback(() => {
                 <span>0.5x</span>
                 <span>3.0x</span>
               </div>
+            </div>
+
+            <div className="border-t border-inherit pt-4">
+              <label className="block text-sm font-bold opacity-90 mb-2 flex items-center gap-2">
+                <Zap className="w-4 h-4 text-yellow-500" /> AI Hardware Acceleration
+              </label>
+              <p className="text-[10px] opacity-70 mb-3 leading-relaxed">
+                Toggle between CPU (compatibility) and GPU (extreme speed). 
+                Requires NVIDIA GPU & CUDA drivers for GPU mode.
+              </p>
+              
+              <div className="flex p-1 bg-black/5 dark:bg-white/5 border border-inherit/30 rounded-xl shadow-inner">
+                <button
+                  onClick={async () => {
+                    try {
+                      setHardwareBusy(true);
+                      await toggleHardware("cpu");
+                      setAiHardware("cpu");
+                      localStorage.setItem("aiHardware", "cpu");
+                    } finally {
+                      setHardwareBusy(false);
+                    }
+                  }}
+                  disabled={hardwareBusy}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${aiHardware === "cpu" ? "bg-white dark:bg-gray-800 shadow-md text-inherit border border-inherit/30" : "opacity-60 hover:opacity-100"}`}
+                >
+                  CPU Mode
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!cudaAvailable) {
+                      window.dispatchEvent(new CustomEvent("showToast", { detail: "NVIDIA GPU not detected or drivers missing! ❌" }));
+                      return;
+                    }
+                    try {
+                      setHardwareBusy(true);
+                      await toggleHardware("cuda");
+                      setAiHardware("cuda");
+                      localStorage.setItem("aiHardware", "cuda");
+                    } finally {
+                      setHardwareBusy(false);
+                    }
+                  }}
+                  disabled={hardwareBusy || !cudaAvailable}
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all relative ${aiHardware === "cuda" ? "bg-indigo-600 text-white shadow-lg" : "opacity-60 hover:opacity-100"} ${!cudaAvailable ? "cursor-not-allowed grayscale" : ""}`}
+                >
+                  GPU Turbo
+                  {!cudaAvailable && <CloseIcon className="absolute top-1 right-1 w-2 h-2 opacity-50" />}
+                </button>
+              </div>
+              
+              {!cudaAvailable && (
+                <p className="text-[9px] text-amber-600 dark:text-amber-400 mt-2 font-medium">
+                  * GPU Turbo is disabled because no compatible GPU was found.
+                </p>
+              )}
             </div>
 
             <AIHighlightCustomizer
@@ -2116,6 +2241,7 @@ const handleChatScroll = useCallback(() => {
                           <video
                             src={m.generatedMediaUrl}
                             controls
+                            aria-label={`AI Generated Video: ${m.text.split('\n')[0].replace('Generated Media for: ', '').slice(0, 100)}`}
                             className="w-full h-auto bg-black cursor-pointer"
                             onPlay={(e) => {
                               e.preventDefault();
@@ -2131,7 +2257,7 @@ const handleChatScroll = useCallback(() => {
                         ) : (
                           <img
                             src={m.generatedMediaUrl}
-                            alt="AI Generated"
+                            alt={`AI Generated Image: ${m.text.split('\n')[0].replace('Generated Media for: ', '').slice(0, 100)}`}
                             className="w-full h-auto cursor-pointer hover:opacity-95 transition-opacity bg-black/5"
                             loading="lazy"
                             referrerPolicy="no-referrer"
@@ -2164,7 +2290,7 @@ const handleChatScroll = useCallback(() => {
                                   cleanPrompt = promptMatch[1].replace(/--ar\s+\d+:\d+/g, "").replace(/--enhance\s+\w+/g, "").trim();
                                 }
                                 
-                                // Set up for img2img - attach the base64 image directly
+                                // Set up for img2img - attach the image directly
                                 if (isBase64) {
                                   // Create a clean attachment object for img2img
                                   const att = {
@@ -2179,11 +2305,36 @@ const handleChatScroll = useCallback(() => {
                                   };
                                   setAttachments([att]);
                                 } else {
-                                  // For URL images, just show message (can't use as img2img without CORS)
-                                  window.dispatchEvent(new CustomEvent("showToast", {
-                                    detail: "URL images need re-generation. For img2img, right-click and save the image first, then upload."
-                                  }));
-                                  setAttachments([]);
+                                  // For URL images, fetch and convert to base64 automatically
+                                  // This works because /python-api is proxied on the same origin
+                                  fetch(imgUrl)
+                                    .then(res => res.blob())
+                                    .then(blob => {
+                                      const reader = new FileReader();
+                                      reader.onloadend = () => {
+                                        const att = {
+                                          file: new File([blob], "reference.png", { type: "image/png" }),
+                                          data: reader.result,
+                                          mimeType: "image/png",
+                                          preview: imgUrl,
+                                          previewUrl: imgUrl,
+                                          type: "image",
+                                          title: "Original Reference",
+                                          description: "Base image for variation"
+                                        };
+                                        setAttachments([att]);
+                                        window.dispatchEvent(new CustomEvent("showToast", {
+                                          detail: "Image loaded for Remix! 🎨"
+                                        }));
+                                      };
+                                      reader.readAsDataURL(blob);
+                                    })
+                                    .catch(err => {
+                                      console.error("Failed to fetch image for remix", err);
+                                      window.dispatchEvent(new CustomEvent("showToast", {
+                                        detail: "Could not load image for remix automatically. Please save and upload manually."
+                                      }));
+                                    });
                                 }
                                 
                                 // Switch to image mode with clean prompt
@@ -2193,7 +2344,16 @@ const handleChatScroll = useCallback(() => {
                            
                                 setInput(cleanPrompt || "Generate similar image, same style and quality");
                                 setShowSettings(false);
-                              }}
+
+                                // UX: Scroll to input and focus
+                                setTimeout(() => {
+                                  const inputEl = document.querySelector('textarea[placeholder*="Ask AI"]');
+                                  if (inputEl) {
+                                    inputEl.focus();
+                                    inputEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                  }
+                                  }, 100);
+                                }}
                               className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-lg backdrop-blur-md shadow-sm transition-colors"
                               title="Edit/Remix (img2img)"
                             >

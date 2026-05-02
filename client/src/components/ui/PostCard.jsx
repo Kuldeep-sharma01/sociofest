@@ -231,7 +231,7 @@ const PostCard = ({
 
   return (
     <div
-      className={`${getCardThemeClasses(appTheme)} rounded-xl shadow-sm border hover:shadow-md transition-all mb-4 break-inside-avoid text-inherit ${isMultiSelectMode && isSelected ? "ring-2 ring-indigo-500 border-indigo-500" : "border-inherit"} ${isMultiSelectMode ? "cursor-pointer" : ""}`}
+      className={`${getCardThemeClasses(appTheme)} rounded-2xl shadow-sm border border-inherit/10 hover:shadow-xl hover:border-inherit/30 transition-all duration-500 mb-6 break-inside-avoid text-inherit ${isMultiSelectMode && isSelected ? "ring-2 ring-indigo-500 border-indigo-500" : ""} ${isMultiSelectMode ? "cursor-pointer" : "hover:scale-[1.01] hover:-translate-y-1"} group relative overflow-hidden`}
       onClick={(e) => {
         if (isMultiSelectMode && toggleSelection) {
           toggleSelection();
@@ -975,7 +975,7 @@ const masonryCols = "columns-1";
                         loop
                         playsInline
                         preload="metadata"
-                        className="w-full aspect-video bg-black rounded-lg object-contain"
+                        className="w-full h-auto min-h-[200px] bg-black/5 rounded-lg object-contain shadow-inner transition-all duration-300"
                       />
                     ) : media.type === "image" ? (
                       <img

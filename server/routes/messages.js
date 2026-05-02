@@ -20,7 +20,7 @@ import { protect } from "../middleware/authMiddleware.js";
 import upload from "../middleware/uploadMiddleware.js";
 import { body, param, query } from "express-validator";
 import { validateRequest } from "../middleware/validateMiddleware.js";
-import rateLimit, { ipKeyGenerator } from "express-rate-limit";
+import rateLimit from "express-rate-limit";
 
 const router = express.Router();
 
@@ -30,7 +30,7 @@ router.use(protect);
 const messageLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 60, // 60 messages per minute per user
-  keyGenerator: (req) => req.user?._id?.toString() || ipKeyGenerator(req.ip),
+  keyGenerator: (req) => req.user._id.toString(), // Use User ID for limiting, since route is protected by auth middleware
   message: { message: "Too many messages sent. Please slow down." },
 });
 

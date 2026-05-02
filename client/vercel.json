@@ -1,5 +1,18 @@
 {
   "rewrites": [
+    { "source": "/api/:path*", "destination": "https://sociofest-backend.onrender.com/api/:path*" },
+    { "source": "/python-api/:path*", "destination": "https://sociofest-python.onrender.com/:path*" },
+
+    { "source": "/uploads/:path*", "destination": "https://sociofest-backend.onrender.com/uploads/:path*" },
+    { "source": "/socket.io/:path*", "destination": "https://sociofest-backend.onrender.com/socket.io/:path*" },
     { "source": "/(.*)", "destination": "/" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Credentials", "value": "true" }
+      ]
+    }
   ]
 }

@@ -29,6 +29,7 @@ import {
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
 // 🧩 Import Routes Statically
 import productRoutes from "./routes/products.js";
+import { createProxyMiddleware } from 'http-proxy-middleware';
 import auth from "./routes/auth.js";
 import usersRoutes from "./routes/users.js";
 import contentRoutes from "./routes/posts.js";
@@ -53,21 +54,37 @@ import settingsRoutes from "./routes/settings.js";
 
 import attendanceRoutes from "./routes/attendance.js";
 import wifiRoutes from "./routes/wifi.js";
+import curriculumRoutes from "./routes/curriculum.js";
 // import { initCronJobs } from "./cron/attendanceNotifier.js";
 
 import express from 'express';
+import cors from 'cors';
 const app = express();
 app.disable("x-powered-by");
 
 // 🔌 Initialize Socket.io
-const http = await import('http');const fs = await import('fs');const { createServer } = http;const { promises: fsPromises } = fs;
+const http = await import('http'); const fs = await import('fs'); const { createServer } = http; const { promises: fsPromises } = fs;
 const httpServer = createServer(app);
 
-const allowedOrigins = process.env.VITE_CLIENT_URL
-  ? process.env.VITE_CLIENT_URL.split(",")
+const allowedOrigins = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(",").map(s => s.trim())
   : ["http://localhost:5173", "http://127.0.0.1:5173"];
 
-const socketio = await import('socket.io');const { Server } = socketio;
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else if (process.env.NODE_ENV !== 'production' &&
+      /^https?:\/\/(192\.168\.|10\.|172\.|localhost)/.test(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+}));
+
+const socketio = await import('socket.io'); const { Server } = socketio;
 const io = new Server(httpServer, {
   cors: {
     origin: (origin, callback) => {
@@ -135,7 +152,7 @@ io.on("connection", async (socket) => {
   socket.emit("connected");
   try {
     await User.findByIdAndUpdate(connectedUserId, { isOnline: true });
-  } catch (e) {}
+  } catch (e) { }
 
   // ✅ Verify room membership before broadcasting typing events
   socket.on("typing", async (room) => {
@@ -165,7 +182,19 @@ io.on("connection", async (socket) => {
     if (convo) socket.join(room);
     // else: silently ignore or emit an error
   });
-  socket.on("join-room", (room) => socket.join(room));
+  socket.on("join-room", (room) => {
+    // Only allow users to join their own user room or their department room
+    const userId = socket.user?._id?.toString();
+    const userDept = socket.user?.department;
+    if (
+      room === userId ||
+      room === `dept:${userDept}` ||
+      room === "global"
+    ) {
+      socket.join(room);
+    }
+    // else: silently reject unauthorized room joins
+  });
   socket.on("join-media-room", (mediaId) => {
     if (mediaId) socket.join(mediaId);
   });
@@ -217,6 +246,58 @@ io.on("connection", async (socket) => {
   });
 }); // ← this closes io.on("connection")
 
+// Define the internal Python URL (defaults to local port 5001)
+// Uses PYTHON_URL (or PYTHON_INTERNAL_URL for legacy compat) from .env
+const PYTHON_SERVICE_URL = process.env.PYTHON_INTERNAL_URL || process.env.PYTHON_URL || 'http://localhost:5001';
+
+// Proxy for Face Recognition service (Python/Flask) — legacy path kept for backward compat
+app.use('/api/face-rec', createProxyMiddleware({
+  target: PYTHON_SERVICE_URL,
+  changeOrigin: true,
+  pathRewrite: { '^/api/face-rec': '' },
+  onProxyReq: (proxyReq, req) => {
+    if (req.headers.authorization) {
+      proxyReq.setHeader('Authorization', req.headers.authorization);
+    }
+  },
+  onError: (err, req, res) => {
+    res.status(502).json({ message: 'Python face-rec service unavailable', error: err.message });
+  }
+}));
+
+// ── Unified Python AI Service Proxy ────────────────────────────────────────
+// Canonical entry point for ALL Python routes:
+//   /python-api/register-face, /python-api/verify-face
+//   /python-api/images/*  (Image Generation)
+//   /python-api/media/*   (Media Storage)
+//   /python-api/admin/storage/*
+// The /python-api prefix is stripped before forwarding to Python root.
+app.use('/python-api', createProxyMiddleware({
+  target: PYTHON_SERVICE_URL,
+  changeOrigin: true,
+  pathRewrite: { '^/python-api': '' },
+  onProxyReq: (proxyReq, req) => {
+    if (req.headers.authorization) {
+      proxyReq.setHeader('Authorization', req.headers.authorization);
+    }
+  },
+  onError: (err, req, res) => {
+    res.status(502).json({ message: 'Python AI service unavailable', error: err.message });
+  }
+}));
+
+
+
+// Code Compiler (Judge0) Test Gateway
+const COMPILER_TEST_URL = process.env.COMPILER_TEST_URL || 'http://localhost:2358';
+app.use('/api/compiler-test', createProxyMiddleware({
+  target: COMPILER_TEST_URL,
+  changeOrigin: true,
+  pathRewrite: {
+    '^/api/compiler-test': '',
+  },
+}));
+
 // console.log("this is the dataLLL", r);
 
 // 📂 Static Folder Configuration
@@ -249,6 +330,7 @@ const apiRoutes = [
   ["/api/settings", settingsRoutes],
   ["/api/wifi", wifiRoutes],
   ["/api/compiler", compilerRoutes],
+  ["/api/curriculum", curriculumRoutes],
 ];
 
 // 🗄️ Connect MongoDB
@@ -258,15 +340,14 @@ const startServer = async () => {
     const uploadsBaseDir = path.join(__dirname, "uploads");
     const uploadsTempDir = path.join(__dirname, "uploads/temp");
     const uploadsProfilesDir = path.join(__dirname, "uploads/profiles");
-    if (!fs.existsSync(uploadsBaseDir)) {
-      fs.mkdirSync(uploadsBaseDir, { recursive: true });
-    }
-    if (!fs.existsSync(uploadsTempDir)) {
-      fs.mkdirSync(uploadsTempDir, { recursive: true });
-    }
-    if (!fs.existsSync(uploadsProfilesDir)) {
-      fs.mkdirSync(uploadsProfilesDir, { recursive: true });
-    }
+    const uploadsMediaDir = path.join(__dirname, "uploads/media");
+    const uploadsVoicesDir = path.join(__dirname, "uploads/voices");
+
+    if (!fs.default.existsSync(uploadsBaseDir)) fs.default.mkdirSync(uploadsBaseDir, { recursive: true });
+    if (!fs.default.existsSync(uploadsTempDir)) fs.default.mkdirSync(uploadsTempDir, { recursive: true });
+    if (!fs.default.existsSync(uploadsProfilesDir)) fs.default.mkdirSync(uploadsProfilesDir, { recursive: true });
+    if (!fs.default.existsSync(uploadsMediaDir)) fs.default.mkdirSync(uploadsMediaDir, { recursive: true });
+    if (!fs.default.existsSync(uploadsVoicesDir)) fs.default.mkdirSync(uploadsVoicesDir, { recursive: true });
 
     await connectDB();
     console.log("✅ MongoDB Connected Successfully");
@@ -289,45 +370,45 @@ const startServer = async () => {
         process.exit(1);
       }
       // For other transient errors, Mongoose will attempt to auto-reconnect.
-   });
+    });
     const isProd = process.env.NODE_ENV === "production";
 
     // 🧩 Middleware
     // SECURITY FIX: Helmet for Anti-XSS, Anti-Sniffing, and Frameguard
     app.use(helmet({ crossOriginResourcePolicy: false }));
     // SECURITY FIX: Strict CORS Whitelist
-const corsMod = await import('cors');app.use(     corsMod.default({
-        origin: function (origin, callback) {
-          // Allow exact matches, no-origin requests, and local network IPs (for mobile testing)
-          if (
-            !origin ||
-            allowedOrigins.includes(origin) ||
-            (!isProd && /^https?:\/\/(192\.168\.|10\.|172\.|localhost)/.test(origin))
-          ) {
-            callback(null, true);
-          } else {
-            callback(null, false); // Fail silently instead of spamming the console with errors
-          }
-        },
-        credentials: true,
-      }),
+    const corsMod = await import('cors'); app.use(corsMod.default({
+      origin: function (origin, callback) {
+        // Allow exact matches, no-origin requests, and local network IPs (for mobile testing)
+        if (
+          !origin ||
+          allowedOrigins.includes(origin) ||
+          (!isProd && /^https?:\/\/(192\.168\.|10\.|172\.|localhost)/.test(origin))
+        ) {
+          callback(null, true);
+        } else {
+          callback(null, false); // Fail silently instead of spamming the console with errors
+        }
+      },
+      credentials: true,
+    }),
     );
     // ✅ Increase global JSON payload limits to support base64 AI images in chat history
     app.use(express.json({ limit: "50mb" }));
     app.use(express.urlencoded({ extended: true, limit: "50mb" }));
-const cookieParserMod = await import('cookie-parser');app.use(cookieParserMod.default());
+    const cookieParserMod = await import('cookie-parser'); app.use(cookieParserMod.default());
     const trustProxy = process.env.TRUST_PROXY;
     if (trustProxy !== undefined) {
       app.set("trust proxy", trustProxy === "true" ? 1 : trustProxy);
     } else {
       app.set("trust proxy", 1);
     }
-const morganMod = await import('morgan');app.use(morganMod.default(isProd ? "combined" : "dev"));
+    const morganMod = await import('morgan'); app.use(morganMod.default(isProd ? "combined" : "dev"));
 
     // SECURITY FIX: Rate Limiting to prevent brute force and DDoS
     const apiLimiter = rateLimit({
       windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 300, // Limit each IP to 300 requests per window
+      max: isProd ? 300 : 5000, // Limit each IP significantly higher in dev mode
       standardHeaders: true,
       legacyHeaders: false,
       message: {
@@ -351,7 +432,7 @@ const morganMod = await import('morgan');app.use(morganMod.default(isProd ? "com
       legacyHeaders: false,
       message: { message: "Too many OTP requests." },
     });
-   
+
     const authLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 1000, // Increased to prevent 429 on profile fetches
@@ -360,15 +441,15 @@ const morganMod = await import('morgan');app.use(morganMod.default(isProd ? "com
       message: { message: "Too many authentication requests, please try again later." },
     });
 
-    // ✅ Add a dedicated, tight rate limit for AI endpoints
+    // ✅ Add a dedicated, but balanced rate limit for AI endpoints
     const aiLimiter = rateLimit({
       windowMs: 60 * 1000,   // 1 minute window
-      max: 10,               // 10 AI requests per minute per IP
+      max: isProd ? 100 : 1000, // Increased from 10 to prevent 429 during normal interaction
       standardHeaders: true,
       legacyHeaders: false,
       message: { message: 'Too many AI requests, please slow down.' },
-      keyGenerator: (req) =>
-        req.user?._id?.toString() || req.headers["x-forwarded-for"] || req.socket.remoteAddress, // Fix for ERR_ERL_KEY_GEN_IPV6
+      keyGenerator: (req) => req.user?._id?.toString() || req.ip,
+      validate: false, 
     });
 
     // Security middleware for static files (e.g., SVG XSS protection)
@@ -415,7 +496,7 @@ const morganMod = await import('morgan');app.use(morganMod.default(isProd ? "com
         const notifications = await Notification.find({ recipient: req.user._id })
           .sort({ createdAt: -1 })
           .limit(50)
-          .select("type message link createdAt isRead") // SECURITY: Explicitly select only safe fields.
+          .select("type message link details createdAt isRead") // SECURITY: Explicitly select only safe fields.
           .lean();
         res.status(200).json({ notifications });
       } catch (error) {
@@ -440,6 +521,44 @@ const morganMod = await import('morgan');app.use(morganMod.default(isProd ? "com
       } catch (error) {
         logger.error("Notification delete error", { error: error.message, notificationId: req.params.id, userId: req.user._id });
         res.status(500).json({ message: "Server error deleting notification." });
+      }
+    });
+
+    // Mark all notifications as read
+    app.put("/api/notifications/read-all", protect, async (req, res) => {
+      try {
+        const Notification = mongoose.model("Notification");
+        await Notification.updateMany(
+          { recipient: req.user._id, isRead: false },
+          { isRead: true }
+        );
+        res.status(200).json({ message: "All notifications marked as read." });
+      } catch (error) {
+        logger.error("Notification read-all error", { error: error.message, userId: req.user._id });
+        res.status(500).json({ message: "Server error updating notifications." });
+      }
+    });
+
+    // Mark notification as read (without deleting)
+    app.put("/api/notifications/:id/read", protect, async (req, res) => {
+      try {
+        const Notification = mongoose.model("Notification");
+        const notification = await Notification.findOneAndUpdate(
+          {
+            _id: req.params.id,
+            recipient: req.user._id, // SECURITY: Ensure user can only modify their own notifications.
+          },
+          { isRead: true },
+          { new: true }
+        );
+
+        if (!notification) {
+          return res.status(404).json({ message: "Notification not found." });
+        }
+        res.status(200).json({ message: "Notification marked as read.", notification });
+      } catch (error) {
+        logger.error("Notification read error", { error: error.message, notificationId: req.params.id, userId: req.user._id });
+        res.status(500).json({ message: "Server error updating notification." });
       }
     });
 
@@ -484,12 +603,12 @@ const morganMod = await import('morgan');app.use(morganMod.default(isProd ? "com
               const stats = await fs.promises.stat(filePath);
               if (now - stats.mtimeMs > 24 * 60 * 60 * 1000) {
                 // Older than 24 hours
-                await fs.promises.unlink(filePath).catch(() => {});
+                await fs.promises.unlink(filePath).catch(() => { });
               }
             }
           }
         } catch (e) {
-logger.warn("Background AI cleanup task failed", { error: e.message });
+          logger.warn("Background AI cleanup task failed", { error: e.message });
         }
       },
       12 * 60 * 60 * 1000,
@@ -514,7 +633,7 @@ logger.warn("Background AI cleanup task failed", { error: e.message });
             );
           }
         } catch (e) {
-logger.warn("Background auto-archive task failed", { error: e.message });
+          logger.warn("Background auto-archive task failed", { error: e.message });
         }
       },
       24 * 60 * 60 * 1000,
@@ -552,13 +671,13 @@ logger.warn("Background auto-archive task failed", { error: e.message });
                 }
                 await post.deleteOne();
               } catch (postError) {
-logger.warn('Failed to clean up post:', { postId: post._id, error: postError.message });
+                logger.warn('Failed to clean up post:', { postId: post._id, error: postError.message });
                 // continue with next post instead of aborting the whole batch
                 failedIds.push(post._id);
               }
             }
           }
-        
+
         } catch (e) {
           console.warn("Background trash cleanup failed", e.message);
         }
@@ -601,18 +720,29 @@ logger.warn('Failed to clean up post:', { postId: post._id, error: postError.mes
 
     const server = await listenWithRetry(startPort);
 
+    // 🛡️ SECURITY WARNING: Detect insecure default secrets in production
+    if (process.env.NODE_ENV === 'production' && 
+       (!process.env.JWT_SECRET || process.env.JWT_SECRET.includes('CHANGE_ME'))) {
+      console.error("\n" + "=".repeat(60));
+      console.error("🛑 CRITICAL SECURITY WARNING 🛑");
+      console.error("Your JWT_SECRET is set to a default or insecure value.");
+      console.error("This allows ANYONE to forge admin tokens and take over the system.");
+      console.error("Please update your environment variables IMMEDIATELY.");
+      console.error("=".repeat(60) + "\n");
+    }
+
     // 🛑 Graceful Shutdown
     // ✅ Force-exit after a timeout if graceful shutdown stalls
     process.on("SIGTERM", () => {
       console.log("SIGTERM received. Shutting down gracefully...");
       const forceExit = setTimeout(() => {
-logger.error('Graceful shutdown timed out. Forcing exit.');
-    process.exit(1);
+        logger.error('Graceful shutdown timed out. Forcing exit.');
+        process.exit(1);
       }, 15_000);  // 15-second hard limit
       forceExit.unref();  // Don't prevent shutdown just because this timer is active
 
       server.close(async () => {
-            clearTimeout(forceExit);
+        clearTimeout(forceExit);
 
         await mongoose.connection.close(false);
         console.log("💤 Server closed.");

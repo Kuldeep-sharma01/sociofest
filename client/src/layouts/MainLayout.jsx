@@ -1,4 +1,5 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import Sidebar from "@/components/Sidebar";
 import { useTheme } from "@/context/ThemeContext";
@@ -9,6 +10,12 @@ const MainLayout = ({ children }) => {
   const [showNavbar, setShowNavbar] = useState(true);
   const lastScrollY = useRef(0);
   const { appTheme } = useTheme();
+  const { pathname } = useLocation();
+
+  // Reset navbar visibility on route change
+  useEffect(() => {
+    setShowNavbar(true);
+  }, [pathname]);
 
   const handleScroll = (e) => {
     const currentScrollY = e.target.scrollTop;
@@ -26,10 +33,12 @@ const MainLayout = ({ children }) => {
       className={`h-[100dvh] overflow-hidden flex flex-col transition-colors duration-300 w-full ${getWrapperThemeClasses(appTheme)}`}
     >
       <div 
-        className={`w-full z-[60] shrink-0 transition-all duration-300 ease-in-out ${showNavbar ? "translate-y-0" : "-translate-y-full pointer-events-none"}`}
+        className={`w-full z-[60] shrink-0 transition-all duration-500 ease-in-out ${showNavbar ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0 pointer-events-none"}`}
         style={{ marginTop: showNavbar ? '0px' : '-65px' }}
       >
-        <Navbar setSidebar={setSidebar} open={sidebar} />
+        <div className="backdrop-blur-xl bg-white/5 dark:bg-black/20 border-b border-white/10 shadow-lg">
+          <Navbar setSidebar={setSidebar} open={sidebar} />
+        </div>
       </div>
 
       <div className="flex flex-1 relative z-0 overflow-hidden w-full">
@@ -40,8 +49,10 @@ const MainLayout = ({ children }) => {
             onClick={() => setSidebar(false)}
           />
         )}
-        <div className={`z-50 shrink-0 h-full transition-all duration-300 ${sidebar ? 'absolute left-0 top-0 bottom-0 sm:relative' : 'relative'}`}>
-          <Sidebar sidebar={sidebar} />
+        <div className={`z-50 shrink-0 h-full transition-all duration-500 ${sidebar ? 'absolute left-0 top-0 bottom-0 sm:relative' : 'relative'} ${sidebar ? 'translate-x-0' : '-translate-x-0'}`}>
+          <div className="h-full border-r border-white/10 backdrop-blur-md bg-white/5 dark:bg-black/10">
+            <Sidebar sidebar={sidebar} />
+          </div>
         </div>
 
         <main id="main-scroll-container" onScroll={handleScroll} className="flex-1 overflow-y-auto scroll-smooth relative z-0 h-full w-full min-w-0">

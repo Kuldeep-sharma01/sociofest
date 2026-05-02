@@ -1,11 +1,11 @@
 {
-  "name": "practice",
+  "name": "sociofest",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "install-all": "npm install && npm install --prefix client && npm install --prefix server",
-    "dev": "concurrently \"npm run server\" \"npm run wait-server && npm run client\" \"npm run voice-ai\"",
+    "dev": "concurrently \"npm run server\" \"npm run wait-server && npm run client\" \"npm run voice-ai\" \"npm run face-ai\"",
     "server": "npx kill-port 5000 && npm run dev --prefix server",
     "wait-server": "npx wait-on http://localhost:5000 --timeout 90000",
     "client": "npm run dev --prefix client",
@@ -15,14 +15,14 @@
     "install-python": "cd server/python_modules && python -m venv venv && venv\\Scripts\\activate.bat && pip install -r requirements.txt",
     "voice-ai": "cd server/python_modules && venv\\Scripts\\activate.bat && python -m uvicorn custom_ai_api:app --host 0.0.0.0 --port 8000",
     "face-ai": "cd server/python_modules && venv\\Scripts\\activate.bat && python -m waitress --listen=0.0.0.0:5001 app:app",
-    "full-dev": "concurrently \"npm run dev\" \"npm run face-ai\"",
+    "full-dev": "concurrently \"npm run server\" \"npm run wait-server && npm run client\" \"npm run voice-ai\" \"npm run face-ai\"",
     "infra:up": "docker compose up -d mongodb",
     "infra:down": "docker compose down",
     "up": "npm run install-all && npm run full-dev",
     "up:docker": "npm run infra:up && npm run full-dev",
     "health:all": "npm run wait-server && npm run wait-face-ai && npm run wait-voice-ai && npm run wait-client",
-    "start-all": "npm pkg exec concurrently \"npm run full-dev\" \"cmd /c start cmd /k cd stable-diffusion-webui \\\\& webui-user.bat\" \"docker compose up mongodb -d\"",
-    "start-all:unix": "concurrently \"npm run full-dev\" \"cd stable-diffusion-webui && ./webui.sh\" \"docker compose up mongodb -d\"",
+    "start-all": "npx concurrently \"npm run full-dev\" \"cmd /c start cmd /k cd stable-diffusion-webui \\& webui-user.bat\" \"docker compose up mongodb -d\"",
+    "start-all:unix": "npx concurrently \"npm run full-dev\" \"cd stable-diffusion-webui && ./webui.sh\" \"docker compose up mongodb -d\"",
     "deploy": "docker compose -f docker-compose.full.yml up -d --build",
     "deploy:gpu": "docker compose -f docker-compose.full.yml --profile gpu up -d --build"
   },
@@ -30,8 +30,5 @@
     "concurrently": "^9.2.1",
     "wait-on": "^7.0.1"
   },
-  "dependencies": {
-    "prop-types": "^15.8.1",
-    "winston": "^3.19.0"
-  }
+  "dependencies": {}
 }

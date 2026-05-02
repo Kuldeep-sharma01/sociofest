@@ -10,9 +10,6 @@ export const useSocket = () => {
 };
 
 const resolveSocketEndpoint = () => {
-  const explicitSocketUrl = import.meta.env.VITE_API_URL;
-  if (explicitSocketUrl) return explicitSocketUrl;
-
   // When API_URL is absolute (e.g. https://api.example.com/api), strip trailing /api.
   if (/^https?:\/\//i.test(API_URL)) {
     return API_URL.replace(/\/api\/?$/i, "");
@@ -34,7 +31,14 @@ export const SocketProvider = ({ children }) => {
       const newSocket = io(ENDPOINT, {
         auth: { token: localStorage.getItem("token") },
       });
-      newSocket.emit("setup", { _id: user._id });
+
+      // Join user-specific and department rooms for real-time notifications
+      newSocket.on("connected", () => {
+        // Join department room so quiz/event notifications from dept are received
+        if (user.department) {
+          newSocket.emit("join-room", `dept:${user.department}`);
+        }
+      });
       setSocket(newSocket);
 
       return () => {

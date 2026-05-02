@@ -178,11 +178,9 @@ const Activities = () => {
               return false;
             }
 
-            // 2. Subject & Semester Match: studentSubjects are already filtered by current semester
-            const subjectNames = studentSubjects.map((s) => s.name);
-            const isRelevant = subjectNames
-              .map((name) => name.toLowerCase().trim())
-              .includes(quiz.subject?.toLowerCase().trim());
+            // 2. Subject & Semester Match: Compare MongoDB Object IDs instead of arbitrary text names
+            const subjectIds = studentSubjects.map((s) => String(s._id));
+            const isRelevant = subjectIds.includes(String(quiz.subject?._id || quiz.subject));
 
             if (!isRelevant || !quiz.isActive) return false;
 
@@ -206,7 +204,12 @@ const Activities = () => {
               quiz.attempts?.filter(
                 (a) => a.student?.toString() === user._id,
               ) || [];
-            return { ...quiz, isRetake: userAttempts.length > 0 };
+              
+            // Convert raw ObjectId to human-readable Subject Name
+            const matchedSubject = studentSubjects.find(s => String(s._id) === String(quiz.subject?._id || quiz.subject));
+            const subjectName = matchedSubject ? matchedSubject.name : "Unknown Subject";
+
+            return { ...quiz, isRetake: userAttempts.length > 0, subjectName };
           });
 
         setAvailableQuizzes(filteredQuizzes);
@@ -520,6 +523,7 @@ const Activities = () => {
           .filter((n) => !currentDismissed.includes(n._id))
           .sort((a, b) => new Date(b.start) - new Date(a.start));
 
+        // Filter for local display - showing unread counts correctly
         setNotifications(allNotifs);
         setRealEvents(realEvts);
       } catch (err) {
@@ -554,11 +558,16 @@ const Activities = () => {
       setNotifications((prev) => prev.filter((n) => n._id !== id));
       
       if (notif?.isSystem) {
-        const API_URL = import.meta.env.VITE_CLIENT_URL || "http://localhost:5000/api";
         fetch(`${API_URL}/notifications/${id}`, {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` }
+        }).then(() => {
+           // Notify Sidebar to update count
+           window.dispatchEvent(new Event("messagesRead"));
         }).catch(() => console.log("System notification dismissed locally."));
+      } else {
+        // Even for public notifications, notify sidebar to re-fetch and respect dismissed list
+        window.dispatchEvent(new Event("messagesRead"));
       }
     } catch (err) {
       console.error("Failed to delete notification", err);
@@ -649,9 +658,32 @@ const Activities = () => {
   }, [loading, loadingAssignments, location.hash]);
 
   // =============================
+  // Mark Notifications as Read on Page Load or Tab View
+  // =============================
+  useEffect(() => {
+    if (token && notifications.length > 0) {
+      const markAsRead = async () => {
+        try {
+          await fetch(`${API_URL}/notifications/read-all`, {
+            method: "PUT",
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          // Dispatch event to sidebar to refresh its count
+          window.dispatchEvent(new Event("messagesRead"));
+        } catch (err) {
+          console.error("Failed to mark notifications as read", err);
+        }
+      };
+      // If we are on the activities page and there are notifications, consider them "seen"
+      markAsRead();
+    }
+  }, [token, notifications.length]); // Mark read when they load
+
+  // =============================
   // UI
   // =============================
   return (
+
     <div className="max-w-5xl mx-auto p-4 sm:p-6 flex flex-col gap-6">
       {/* Header */}
       <div
@@ -719,8 +751,10 @@ const Activities = () => {
         </button>
         <button onClick={() => setActiveTab('notifications')} className={`flex items-center gap-2 px-5 py-3 rounded-t-xl font-bold text-sm whitespace-nowrap transition-all ${activeTab === 'notifications' ? 'bg-black/5 dark:bg-white/5 border-b-2 border-red-500 text-red-600 dark:text-red-400' : 'opacity-70 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/5 text-inherit'}`}>
           <Bell className="w-4 h-4" /> Notifications
-          {notifications.length > 0 && (
-            <span className="bg-red-500 text-white px-2 py-0.5 rounded-full text-[10px] ml-1">{notifications.length}</span>
+          {notifications.filter(n => !n.isRead && !n.isPublic).length > 0 && (
+            <span className="bg-red-500 text-white px-2 py-0.5 rounded-full text-[10px] ml-1">
+              {notifications.filter(n => !n.isRead && !n.isPublic).length}
+            </span>
           )}
         </button>
       </div>
@@ -834,7 +868,7 @@ const Activities = () => {
                         className="flex flex-col p-5 rounded-2xl shadow-sm border border-inherit/30 bg-black/5 dark:bg-white/5 hover:shadow-md transition-all group"
                       >
                         <div className="mb-4 flex-1">
-                          <span className="text-[10px] font-bold uppercase tracking-wider opacity-80 bg-black/10 dark:bg-white/10 px-2.5 py-1 rounded-md border border-inherit/20 text-inherit">{quiz.subject}</span>
+                          <span className="text-[10px] font-bold uppercase tracking-wider opacity-80 bg-black/10 dark:bg-white/10 px-2.5 py-1 rounded-md border border-inherit/20 text-inherit">{quiz.subjectName}</span>
                           <h3 className="font-bold text-lg mt-3 leading-tight text-inherit group-hover:text-blue-500 transition-colors line-clamp-2">
                             {quiz.title}
                           </h3>

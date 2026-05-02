@@ -116,8 +116,9 @@ const userSchema = new mongoose.Schema({
     }
   },
   banner:        { type: String,  default: '' },
+  faceEncodingVector: { type: String, select: false }, // Encrypted vector string from Python service
+  isFaceRegistered: { type: Boolean, default: false }, // Public flag for frontend UI
   enrollmentNumber: { type: String },
-  phone:         { type: String },
   // Online presence
   isOnline: { type: Boolean, default: false },
   lastSeen: { type: Date },
@@ -140,8 +141,8 @@ userSchema.index({ status: 1, role: 1 });              // Admin dashboard filter
 userSchema.index({ isOnline: 1 });                     // Presence queries
 
 // ── Pre-save: Keep top-level email in sync with emails[0].address ─────────────
-// ✅ Keep both directions in sync or make one field canonical
 userSchema.pre('save', function (next) {
+  // Sync email fields
   if (this.email && (!this.emails || this.emails.length === 0)) {
     this.emails = [{ address: this.email, isVerified: false }];
   } else if (this.emails?.length > 0) {

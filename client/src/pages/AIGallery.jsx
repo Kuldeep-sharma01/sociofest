@@ -247,9 +247,9 @@ const AIGallery = () => {
                   )}
                   <div className="w-16 h-16 rounded-lg bg-black/10 dark:bg-white/10 shrink-0 overflow-hidden relative cursor-pointer" onClick={(e) => { e.stopPropagation(); openMedia(img); }}>
                     {img.type === "video" ? (
-                      <video src={img.url} className="w-full h-full object-cover opacity-80" />
+                      <video src={img.url} aria-label={`AI Generated Video Thumbnail: ${img.prompt}`} className="w-full h-full object-cover opacity-80" />
                     ) : (
-                      <img src={img.url} className="w-full h-full object-cover" alt="thumbnail" />
+                      <img src={img.url} className="w-full h-full object-cover" alt={`AI Generated Image Thumbnail: ${img.prompt}`} />
                     )}
                     {img.type === "video" && <Video className="absolute inset-0 m-auto w-6 h-6 text-white drop-shadow-md" />}
                   </div>

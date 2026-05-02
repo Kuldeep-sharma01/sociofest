@@ -68,7 +68,11 @@ from deep_translator import GoogleTranslator
 import jwt as pyjwt
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+load_dotenv()  # Load own .env first
+# Fallback to parent server/.env for local monorepo dev (no-op in independent deployment)
+_parent_env = os.path.join(os.path.dirname(__file__), '..', '.env')
+if os.path.exists(_parent_env):
+    load_dotenv(_parent_env, override=False)
 
 JWT_SECRET = os.getenv('JWT_SECRET')
 if not JWT_SECRET:
@@ -116,10 +120,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Security: Enable CORS so the React frontend can directly communicate with the voice API
-ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', 'http://localhost:5173').split(',')
+ALLOWED_ORIGINS = (os.getenv('FRONTEND_URL') or os.getenv('ALLOWED_ORIGINS', 'http://localhost:5173')).split(',')
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=[o.strip() for o in ALLOWED_ORIGINS],
     allow_credentials=True,
     allow_methods=["POST", "GET", "HEAD"],
     allow_headers=["Authorization", "Content-Type"],

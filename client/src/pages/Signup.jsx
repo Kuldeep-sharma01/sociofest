@@ -37,6 +37,11 @@ const DEFAULT_FORM_DATA = {
   password: "",
   department: "",
   role: "",
+  bio: "",
+  contactNumber: "",
+  location: "",
+  dob: "",
+  skills: "",
 };
 
 const DEFAULT_STUDENT_DATA = {
@@ -134,8 +139,9 @@ const Signup = ({
   // Effect to populate form when in edit mode
   useEffect(() => {
     if (isEditMode && initialData) {
-      const user = initialData.user || {};
-      const departmentName = user.department?.name || "";
+      // Robust extraction: handles both raw user objects and { user, roleData } structures
+      const user = initialData.user || initialData || {};
+      const departmentName = (typeof user.department === "object" ? user.department?.name : user.department) || "";
 
       setFormData((prev) => ({
         ...prev,
@@ -143,9 +149,15 @@ const Signup = ({
         email: user.email || "",
         role: user.role || "",
         department: departmentName,
+        bio: user.bio || "",
+        contactNumber: user.contactNumber || user.phone || "",
+        location: user.location || "",
+        dob: user.dob ? new Date(user.dob).toISOString().split('T')[0] : "",
+        skills: Array.isArray(user.skills) ? user.skills.join(", ") : "",
         password: "", // Never pre-fill password
       }));
 
+      // Role specific data extraction
       if (user.role === "Student") {
         const sData = initialData.studentData || user.studentData || initialData || {};
         setStudentData({
@@ -161,13 +173,15 @@ const Signup = ({
           tData.qualifications ||
           tData.experience ||
           (tData.subjects && tData.subjects.length > 0);
+        
         if (user.role === "HOD" && hasTeachingData) {
           setHodTeaches(true);
         }
+        
         setTeacherData({
           qualifications: tData.qualifications || "",
           experience: tData.experience || "",
-          subjects: (tData.subjects || []).map((s) => ({
+          subjects: (tData.subjects || []).filter(Boolean).map((s) => ({
             _id: s._id,
             subject: s.name || s.subject || "",
             semester: s.semester,
@@ -470,7 +484,10 @@ const Signup = ({
     // This refactors the signup process into a single, atomic API call
     // to prevent data inconsistency issues where a user might be created
     // without their corresponding role profile (Student, Teacher, etc.).
-    const payload = { ...formData };
+    const payload = { 
+      ...formData,
+      skills: formData.skills ? formData.skills.split(",").map(s => s.trim()).filter(Boolean) : [],
+    };
     const teacherCheck = analyzeTeacherForm();
 
     if (oAuthProfile) {
@@ -843,6 +860,81 @@ const Signup = ({
           </>
         )}
 
+        {/* General Personal Info - visible ONLY during edit, not during signup */}
+        {isEditMode && formData.role && (
+          <div className="flex flex-col gap-3 mt-2">
+            <div className="relative flex py-2 items-center">
+              <div className="flex-grow border-t border-inherit/10"></div>
+              <span className="flex-shrink-0 mx-4 text-inherit opacity-40 text-[10px] font-bold uppercase tracking-widest">Personal Details</span>
+              <div className="flex-grow border-t border-inherit/10"></div>
+            </div>
+            
+            <textarea
+              name="bio"
+              value={formData.bio}
+              placeholder="Tell us about yourself (Bio)"
+              onChange={handleBaseChange}
+              rows="2"
+              className="w-full px-3 py-2 border border-inherit/30 rounded-lg bg-black/5 dark:bg-white/5 text-inherit focus:outline-none focus:ring-2 focus:ring-current transition-colors resize-none text-sm"
+            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input
+                name="contactNumber"
+                value={formData.contactNumber}
+                placeholder="Contact Number"
+                onChange={handleBaseChange}
+                className="w-full px-3 py-2 border border-inherit/30 rounded-lg bg-black/5 dark:bg-white/5 text-inherit focus:outline-none focus:ring-2 focus:ring-current transition-colors text-sm"
+              />
+              <input
+                name="location"
+                value={formData.location}
+                placeholder="Location (City, Country)"
+                onChange={handleBaseChange}
+                className="w-full px-3 py-2 border border-inherit/30 rounded-lg bg-black/5 dark:bg-white/5 text-inherit focus:outline-none focus:ring-2 focus:ring-current transition-colors text-sm"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider opacity-50 ml-1 mb-1 block">Date of Birth</label>
+                <input
+                  name="dob"
+                  value={formData.dob}
+                  type="date"
+                  onChange={handleBaseChange}
+                  className="w-full px-3 py-2 border border-inherit/30 rounded-lg bg-black/5 dark:bg-white/5 text-inherit focus:outline-none focus:ring-2 focus:ring-current transition-colors text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider opacity-50 ml-1 mb-1 block">Skills (Comma separated)</label>
+                <input
+                  name="skills"
+                  value={formData.skills}
+                  placeholder="React, Design, Python..."
+                  onChange={handleBaseChange}
+                  className="w-full px-3 py-2 border border-inherit/30 rounded-lg bg-black/5 dark:bg-white/5 text-inherit focus:outline-none focus:ring-2 focus:ring-current transition-colors text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="relative flex py-2 items-center">
+              <div className="flex-grow border-t border-inherit/10"></div>
+              <span className="flex-shrink-0 mx-4 text-inherit opacity-40 text-[10px] font-bold uppercase tracking-widest">{formData.role} Information</span>
+              <div className="flex-grow border-t border-inherit/10"></div>
+            </div>
+          </div>
+        )}
+
+        {/* Essential Role-Specific Info - visible during signup and edit */}
+        {!isEditMode && formData.role && !["Personal Details"].some(s => s === formData.role) && (
+           <div className="relative flex py-2 items-center md:hidden">
+              <div className="flex-grow border-t border-inherit/10"></div>
+              <span className="flex-shrink-0 mx-4 text-inherit opacity-40 text-[10px] font-bold uppercase tracking-widest">{formData.role} Information</span>
+              <div className="flex-grow border-t border-inherit/10"></div>
+           </div>
+        )}
+
         {formData.role === "Student" && (
           <StudentForm
             studentData={studentData}
@@ -850,6 +942,7 @@ const Signup = ({
             totalSemesters={totalSemesters}
             studentSubjects={studentSubjects}
             department={formData.department}
+            isEditMode={isEditMode}
           />
         )}
 

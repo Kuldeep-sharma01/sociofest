@@ -2,7 +2,7 @@
 Flask Routes for Stable Diffusion Image Generation API
 """
 
-from flask import Blueprint, request, jsonify, send_from_directory
+from flask import Blueprint, request, jsonify, send_from_directory, current_app
 from image_generation import init_image_generation
 import logging
 import os
@@ -16,7 +16,7 @@ from auth_middleware import token_required
 
 logger = logging.getLogger(__name__)
 
-image_bp = Blueprint('image_generation', __name__, url_prefix='/python-api/images')
+image_bp = Blueprint('image_generation', __name__, url_prefix='/sd-api')
 
 _user_last_gen = defaultdict(float)
 GEN_COOLDOWN_SECONDS = 10
@@ -25,39 +25,44 @@ GEN_COOLDOWN_SECONDS = 10
 # This completely eliminates the need for Celery & Redis while preventing VRAM OOM!
 image_queue = ThreadPoolExecutor(max_workers=1)
 
-# Store task results in memory
-task_results = {}
+# Persistent task state in MongoDB
+def get_task_collection():
+    return current_app.db['ai_tasks']
 
-def background_generate(task_id, prompt, negative_prompt, num_steps, guidance_scale, width, height, model_key, return_base64, save):
-    try:
-        task_results[task_id] = {'state': 'PROCESSING', 'status': 'Generating image...'}
-        service = init_image_generation()
-        if not service.load_model(model_key):
-            task_results[task_id] = {'state': 'FAILURE', 'error': f"Failed to load model {model_key}"}
-            return
+def background_generate(app, task_id, prompt, negative_prompt, num_steps, guidance_scale, width, height, model_key, return_base64, save):
+    with app.app_context():
+        try:
+            tasks = get_task_collection()
+            tasks.update_one({'task_id': task_id}, {'$set': {'state': 'PROCESSING', 'status': 'Generating image...'}})
             
-        image = service.generate_image(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            num_steps=num_steps,
-            guidance_scale=guidance_scale,
-            width=width,
-            height=height
-        )
-        
-        response = {}
-        if save:
-            filename = service.save_image(image)
-            response['imageUrl'] = f"/python-api/images/generated/{filename}"
+            service = init_image_generation()
+            if not service.load_model(model_key):
+                tasks.update_one({'task_id': task_id}, {'$set': {'state': 'FAILURE', 'error': f"Failed to load model {model_key}"}})
+                return
+                
+            image = service.generate_image(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                num_steps=num_steps,
+                guidance_scale=guidance_scale,
+                width=width,
+                height=height
+            )
             
-        if return_base64:
-            response['image_base64'] = service.image_to_base64(image)
-            response['format'] = 'png'
-            
-        task_results[task_id] = {'state': 'SUCCESS', 'result': response}
-    except Exception as e:
-        logger.error(f"Background generation error: {e}")
-        task_results[task_id] = {'state': 'FAILURE', 'error': str(e)}
+            response = {}
+            if save:
+                filename = service.save_image(image)
+                response['imageUrl'] = f"/python-api/sd-api/generated/{filename}"
+                
+            if return_base64:
+                response['image_base64'] = service.image_to_base64(image)
+                response['format'] = 'png'
+                
+            tasks.update_one({'task_id': task_id}, {'$set': {'state': 'SUCCESS', 'result': response}})
+        except Exception as e:
+            logger.error(f"Background generation error: {e}")
+            with app.app_context():
+                get_task_collection().update_one({'task_id': task_id}, {'$set': {'state': 'FAILURE', 'error': str(e)}})
 
 
 @image_bp.route('/health', methods=['GET'])
@@ -107,20 +112,36 @@ def generate_image():
         if len(negative_prompt) > 500:
             return jsonify({'error': 'Negative prompt too long (max 500 characters)'}), 400
 
+        # --- AI PROMPT ENHANCEMENT ---
+        PROMPT_SUFFIX = ", smooth flawless skin, perfect complexion, soft studio lighting, clear face, natural, realistic, beautiful, ultra hd, 8k resolution, cinematic lighting, photorealistic, intricate details, professional photography, highly detailed, sharp focus, masterpiece, 4k"
+        enhanced_prompt = f"{prompt.strip()}{PROMPT_SUFFIX}"
+        
+        DEFAULT_NEGATIVE = "red skin, sunburn, burnt skin, rosacea, skin rash, skin redness, inflamed skin, red cheeks, red nose, blurry, low quality, distorted, deformed, extra limbs, bad anatomy, grainy, low resolution, watermark, text, signature, mutation, malformed, out of focus, lowres"
+        final_negative = f"{DEFAULT_NEGATIVE}, {negative_prompt.strip()}" if negative_prompt.strip() else DEFAULT_NEGATIVE
+        # -----------------------------
+
         model_key = data.get('model', 'sd-1-5')
         
         task_id = str(uuid.uuid4())
-        task_results[task_id] = {'state': 'PENDING', 'status': 'Pending in queue...'}
+        get_task_collection().insert_one({
+            'task_id': task_id,
+            'user_id': request.user_id,
+            'state': 'PENDING',
+            'status': 'Pending in queue...',
+            'created_at': time.time()
+        })
         
+        from flask import current_app
         image_queue.submit(
             background_generate,
+            app=current_app._get_current_object(),
             task_id=task_id,
-            prompt=prompt,
-            negative_prompt=negative_prompt,
+            prompt=enhanced_prompt,
+            negative_prompt=final_negative,
             num_steps=min(int(data.get('num_steps', 30)), 50),
             guidance_scale=float(data.get('guidance_scale', 7.5)),
-            width=int(data.get('width', 512)),
-            height=int(data.get('height', 512)),
+            width=int(data.get('width', 1024)), # Default to higher res
+            height=int(data.get('height', 1024)),
             model_key=model_key,
             return_base64=data.get('return_base64', False),
             save=data.get('save', False)
@@ -141,14 +162,14 @@ def generate_image():
 @token_required
 def check_task_status(task_id):
     """Check background task status"""
-    task = task_results.get(task_id)
+    task = get_task_collection().find_one({'task_id': task_id}, {'_id': 0})
     
     if not task:
-        return jsonify({'state': 'FAILURE', 'error': 'Task not found or expired'}), 404
+        return jsonify({'state': 'FAILURE', 'error': 'Task not found'}), 404
         
-    # Free up RAM by removing the task once the Node.js server reads the final result
-    if task['state'] in ['SUCCESS', 'FAILURE']:
-        del task_results[task_id]
+    # Free up DB space by removing older tasks (TTL logic can be handled by index too)
+    # But for now we just return the doc.
+    # Optionally: if task['state'] in ['SUCCESS', 'FAILURE']: ...
         
     return jsonify(task), 200
 
@@ -217,7 +238,6 @@ def load_model():
 
 
 @image_bp.route('/generated/<filename>', methods=['GET'])
-@token_required
 def serve_generated_image(filename):
     """Serve generated image securely"""
     if not re.match(r'^[\w\-]+\.(png|jpg|webp)$', filename):

@@ -41,6 +41,9 @@ server/.env.*
 client/.env
 client/.env.*
 !client/.env.example
+server/python_modules/.env
+server/python_modules/.env.*
+!server/python_modules/.env.example
 
 logs/
 *.log

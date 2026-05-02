@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import fs from "fs";
+import path from "path";
 import axios from "axios";
 import FormData from "form-data";
 import {
@@ -34,7 +35,7 @@ const assertAiAccess = async (req) => {
   if (!req.user) {
     return { error: true, status: 401, message: 'Unauthorized - Please log in' };
   }
-  
+
   // Check 2: AI enabled in system settings
   try {
     const settings = await readSystemSettings();
@@ -45,17 +46,17 @@ const assertAiAccess = async (req) => {
     console.warn('Could not read system settings:', settingsErr.message);
     // Continue with defaults if settings can't be read
   }
-  
+
   // Check 3: User role in allowed list
   if (!AI_ALLOWED_ROLES.has(req.user.role)) {
     return { error: true, status: 403, message: `AI access is not available for your account role (${req.user.role}). Only Admin, Teacher, HOD, and Student roles can access AI.` };
   }
-  
+
   // Check 4: User status is approved
   if (req.user.status !== 'Approved') {
     return { error: true, status: 403, message: `Your account must be Approved to use AI features. Current status: ${req.user.status || 'Unknown'}` };
   }
-  
+
   return { error: false, status: 200 };
 };
 
@@ -63,7 +64,7 @@ export const generateContent = async (req, res) => {
   try {
     const accessCheck = await assertAiAccess(req);
     if (accessCheck.error) {
-      return accessCheck.status === 401 
+      return accessCheck.status === 401
         ? badRequest(res, accessCheck.message)
         : forbidden(res, accessCheck.message);
     }
@@ -208,22 +209,28 @@ export const transcribeAudio = async (req, res) => {
     ]);
 
     const text = result.response.text();
-
-    ok(
-      res,
-      {
-        vtt: `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\n${text}`,
-        subtitles: text,
-        duration: 5.0,
-      },
-      "Audio transcribed successfully",
-    );
+    return ok(res, { text, vtt: `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\n${text}` }, "Audio transcribed via Gemini");
   } catch (error) {
-    console.error("Transcription Error:", error);
-    return serverError(res, error.message);
+    console.log("Gemini transcription failed, trying local fallback...");
+    try {
+      const pythonUrl = process.env.PYTHON_INTERNAL_URL || process.env.PYTHON_URL || "http://localhost:5001";
+      const formData = new FormData();
+      formData.append('file', fs.createReadStream(req.file.path), req.file.originalname);
+
+      const response = await axios.post(`${pythonUrl}/voice-api/transcribe`, formData, {
+        headers: {
+          ...formData.getHeaders(),
+          'Authorization': req.headers.authorization
+        }
+      });
+      return ok(res, response.data, "Audio transcribed via local Whisper");
+    } catch (localError) {
+      console.error("Local Transcription Error:", localError.message);
+      return serverError(res, localError.message);
+    }
   } finally {
     if (req.file?.path) {
-      fs.unlink(req.file.path, () => {});
+      fs.unlink(req.file.path, () => { });
     }
   }
 };
@@ -289,7 +296,7 @@ export const analyzeImage = async (req, res) => {
     return serverError(res, error.message);
   } finally {
     if (req.file?.path) {
-      fs.unlink(req.file.path, () => {});
+      fs.unlink(req.file.path, () => { });
     }
   }
 };
@@ -328,7 +335,7 @@ export const translateMedia = async (req, res) => {
 
     const result = await model.generateContent(prompt);
     const translatedText = result.response.text();
-    
+
     // Generate VTT and redirect to TTS for multi-lingual dubbing
     const translatedVtt = `WEBVTT\n\n00:00:00.000 --> 00:10:00.000\n${translatedText}`;
     const translatedAudioUrl = `/api/ai/text-to-speech?text=${encodeURIComponent(translatedText.substring(0, 150))}&language=${targetLanguage}`;
@@ -402,6 +409,41 @@ export const textToSpeech = async (req, res) => {
       return res.send(Buffer.from(response.data));
     }
 
+    if (useProvider === "local" || useProvider === "python") {
+      const pythonUrl = process.env.PYTHON_INTERNAL_URL || process.env.PYTHON_URL || "http://localhost:5001";
+      const formData = new FormData();
+      formData.append('text', text);
+      formData.append('language', language);
+
+      const useUserVoice = req.body.useUserVoice || req.query.useUserVoice === 'true';
+
+      // If a reference voice file was uploaded, use it. 
+      if (req.file) {
+        formData.append('speaker_wav', fs.createReadStream(req.file.path), req.file.originalname);
+      } else if (useUserVoice && req.user) {
+        // Check if user has a saved voice
+        const voicePath = `uploads/voices/user_${req.user._id}.wav`;
+        if (fs.existsSync(voicePath)) {
+          formData.append('speaker_wav', fs.createReadStream(voicePath), `user_${req.user._id}.wav`);
+        } else {
+          return badRequest(res, "User voice profile not found. Please upload your voice first.");
+        }
+      } else {
+        return badRequest(res, "Voice cloning requires a reference 'speaker_wav' file upload or a saved user voice profile.");
+      }
+
+      const response = await axios.post(`${pythonUrl}/voice-api/clone-voice`, formData, {
+        headers: {
+          ...formData.getHeaders(),
+          'Authorization': req.headers.authorization
+        },
+        responseType: "arraybuffer"
+      });
+
+      res.setHeader("Content-Type", "audio/wav");
+      return res.send(Buffer.from(response.data));
+    }
+
     return unprocessableEntity(res, `TTS provider '${useProvider}' is not supported yet.`);
   } catch (error) {
     console.error("Text-to-Speech Error:", error.message);
@@ -414,18 +456,18 @@ const ALLOWED_PROVIDERS = ['gemini', 'openai', 'openrouter', 'deepseek', 'ollama
 
 // ✅ allowlist models per provider (null means all dynamic models are allowed)
 const ALLOWED_MODELS = {
-  openai:     null,
+  openai: null,
   openrouter: null,
-  gemini:     null,
-  claude:     null,
-  deepseek:   null,
+  gemini: null,
+  claude: null,
+  deepseek: null,
   perplexity: null,
-  ollama:     null,
+  ollama: null,
   huggingface: null,
-  stability:  null,
-  bolt:       null,
-  v0dev:      null,
-  emergent:   null,
+  stability: null,
+  bolt: null,
+  v0dev: null,
+  emergent: null,
 };
 
 const validateModel = (provider, model) => {
@@ -544,14 +586,14 @@ export const fetchModels = async (req, res) => {
     // ✅ Check authorization before proceeding
     const accessCheck = await assertAiAccess(req);
     if (accessCheck.error) {
-      return accessCheck.status === 401 
+      return accessCheck.status === 401
         ? badRequest(res, accessCheck.message)
         : forbidden(res, accessCheck.message);
     }
-    
+
     const { provider, apiKey: bodyApiKey } = req.body;
     const clientKey = bodyApiKey || req.headers['x-api-key'] || req.headers['x-ai-key'];
-    
+
     if (!ALLOWED_PROVIDERS.includes(provider)) {
       return badRequest(res, 'Invalid provider');
     }
@@ -628,21 +670,21 @@ export const fetchModels = async (req, res) => {
       claude: async () => {
         const apiKey = clientKey || req.user?.claudeApiKey || process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
         try {
-            if (!apiKey) throw new Error("No Key");
-            const response = await axios.get("https://api.anthropic.com/v1/models", {
-                headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
-            });
-            return (response.data.data || []).map(m => ({ id: m.id, name: m.display_name || m.id }));
-        } catch(e) {
-            return [
-              { id: 'claude-3-7-sonnet-latest', name: 'Claude 3.7 Sonnet' },
-              { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' },
-              { id: 'claude-3-5-haiku-latest', name: 'Claude 3.5 Haiku' },
-              { id: 'claude-3-opus-latest', name: 'Claude 3 Opus' }
-            ];
+          if (!apiKey) throw new Error("No Key");
+          const response = await axios.get("https://api.anthropic.com/v1/models", {
+            headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
+          });
+          return (response.data.data || []).map(m => ({ id: m.id, name: m.display_name || m.id }));
+        } catch (e) {
+          return [
+            { id: 'claude-3-7-sonnet-latest', name: 'Claude 3.7 Sonnet' },
+            { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' },
+            { id: 'claude-3-5-haiku-latest', name: 'Claude 3.5 Haiku' },
+            { id: 'claude-3-opus-latest', name: 'Claude 3 Opus' }
+          ];
         }
       },
-perplexity: async () => [
+      perplexity: async () => [
         { id: 'sonar', name: 'Sonar' },
         { id: 'sonar-pro', name: 'Sonar Pro' },
         { id: 'sonar-reasoning', name: 'Sonar Reasoning' },
@@ -931,7 +973,7 @@ export const proxyChat = async (req, res) => {
           content: msg.text,
         };
         if (isLast && mediaArray && mediaArray.length > 0) {
-          message.images = mediaArray.map(media => 
+          message.images = mediaArray.map(media =>
             media.data.includes(",") ? media.data.split(",")[1] : media.data
           );
         }
@@ -1012,7 +1054,7 @@ export const proxyMedia = async (req, res) => {
       ollamaModel,
       apiKey: bodyApiKey
     } = req.body;
-    
+
     const clientKey = bodyApiKey || req.headers['x-api-key'] || req.headers['x-ai-key'];
 
     // ✅ Allow server-configured environments or user-provided keys
@@ -1028,8 +1070,8 @@ export const proxyMedia = async (req, res) => {
     if (!apiKey) return serverError(res, `${provider} is not configured`);
 
     // ✅ Same rule: server-side credentials and fixed host allowlists only
-    const ALLOWED_SD_HOSTS = new Set([process.env.SD_HOST || 'http://127.0.0.1:5001', 'http://localhost:5001', 'http://127.0.0.1:7860']);
-    const sdHost = process.env.SD_HOST || 'http://127.0.0.1:5001';
+    const sdHost = process.env.SD_HOST || process.env.PYTHON_INTERNAL_URL || 'http://127.0.0.1:5001';
+    const ALLOWED_SD_HOSTS = new Set([sdHost, 'http://127.0.0.1:5001', 'http://localhost:5001', 'http://127.0.0.1:7860']);
     if (!ALLOWED_SD_HOSTS.has(sdHost)) return serverError(res, 'SD host misconfigured. Allowed hosts: 5001 or 7860.');
 
     const ALLOWED_OLLAMA_HOSTS = new Set([process.env.OLLAMA_HOST || 'http://127.0.0.1:11434', 'http://localhost:11434']);
@@ -1081,7 +1123,7 @@ export const proxyMedia = async (req, res) => {
     }
 
     let enhancedPrompt = cleanPrompt || "";
-    const negativePrompt = "cropped, out of frame, cut off, missing head, truncated, poorly drawn face, poorly drawn feet, poorly drawn hands, bad anatomy, deformed, mutated, extra limbs, ugly, blurry, watermark, text, dense dark dots on face, heavy freckles, skin artifacts, asymmetrical eyes, heterochromia, mismatched eye colors";
+    const negativePrompt = "cropped, out of frame, cut off, missing head, truncated, poorly drawn face, poorly drawn feet, poorly drawn hands, bad anatomy, deformed, mutated, extra limbs, ugly, blurry, watermark, text, dark spots, black dots, acne, blemishes, freckles, skin artifacts, uneven skin tone, noisy skin, trypophobia, asymmetrical eyes, heterochromia, mismatched eye colors, red skin, sunburn, burnt skin, rosacea, skin rash, skin redness, inflamed skin, red cheeks, red nose";
 
     // ✅ Validate ollamaModel exactly like selectedModel
     const safeOllamaModel = ollamaModel && /^[\w\.\-:\/]+$/.test(ollamaModel) && ollamaModel.length <= 100
@@ -1097,8 +1139,8 @@ export const proxyMedia = async (req, res) => {
     ) {
       try {
         const sysInstruction =
-          "You are a master AI image prompt engineer. Expand this concept into highly detailed prompt. PRESERVE previous subject/style/reference from conversation history (e.g. if 'naruto' was mentioned before, keep Naruto character). Make exactly 2D if '2d' specified, symmetrical natural face with matching eye colors. Ultra-realistic skin without dense dark dots (light freckles OK). Return ONLY raw prompt text.";
-        
+          "You are a master AI image prompt engineer. Expand this concept into highly detailed prompt. PRESERVE previous subject/style/reference from conversation history (e.g. if 'naruto' was mentioned before, keep Naruto character). Make exactly 2D if '2d' specified, symmetrical natural face with matching eye colors. Perfect, smooth, flawless, healthy skin without any dark spots, blemishes, freckles, redness, or burns. Return ONLY raw prompt text.";
+
         const cfg = await getModelConfig();
         const chain = cfg?.routes?.chat?.length ? cfg.routes.chat : DEFAULT_CHAT_CHAIN;
         const combinedPrompt = `${sysInstruction}\n\nConcept to expand: ${cleanPrompt}`;
@@ -1132,66 +1174,84 @@ export const proxyMedia = async (req, res) => {
               enhancedPrompt = data.message.content.trim();
           }
         }
-      } catch (e) {} // Fallback to normal if enhancement fails
+      } catch (e) { } // Fallback to normal if enhancement fails
     }
 
-// Force 16K super-HD + framing (max pixel density)
-if (type === "image") {
-    const hdAdditions = ", 16k uhd, ultra high resolution 2048px, pixel perfect, hyper detailed 8k textures, no pixelation, ultra sharp, crisp edges, masterpiece, best quality, photorealistic";
-    if (!enhancedPrompt.toLowerCase().includes("16k")) {
+    // Force 16K super-HD + framing (max pixel density)
+    if (type === "image") {
+      const hdAdditions = ", smooth flawless skin, perfect complexion, soft studio lighting, clear face, 16k uhd, ultra high resolution 2048px, pixel perfect, hyper detailed 8k textures, no pixelation, ultra sharp, crisp edges, masterpiece, best quality, photorealistic";
+      if (!enhancedPrompt.toLowerCase().includes("16k")) {
         enhancedPrompt += hdAdditions;
+      }
     }
-}
 
     if (type === "image") {
       let base64ForStorage = null;
       let pollinationsUrl = null;
 
-      if (provider === "openai") {
-        const response = await axios.post(
-          "https://api.openai.com/v1/images/generations",
-          {
-            model: "dall-e-3",
-            prompt: enhancedPrompt,
-            n: 1,
-            size: dalleSize,
-            quality: "hd",
-            style: "vivid",
-            response_format: "b64_json",
-          },
-          { headers: { Authorization: `Bearer ${apiKey}` } },
-        );
-        base64ForStorage = `data:image/png;base64,${response.data.data[0].b64_json}`;
-      } else if (provider === "stability") {
-        if (selectedMedia?.data) {
-          // Image-to-Image or Edit request
-          const imageBuffer = Buffer.from(
-            selectedMedia.data.split(",")[1],
-            "base64",
+      const runImageGen = async (targetProvider) => {
+        if (targetProvider === "openai") {
+          const response = await axios.post(
+            "https://api.openai.com/v1/images/generations",
+            {
+              model: "dall-e-3",
+              prompt: enhancedPrompt,
+              n: 1,
+              size: dalleSize,
+              quality: "hd",
+              style: "vivid",
+              response_format: "b64_json",
+            },
+            { headers: { Authorization: `Bearer ${apiKey}` } },
           );
-
-          if (/remove background|erase background/i.test(cleanPrompt)) {
-            const form = new FormData();
-            form.append("image", imageBuffer, "source.png");
-            const response = await axios.post(
-              "https://api.stability.ai/v2beta/stable-image/edit/remove-background",
-              form,
-              {
-                headers: { ...form.getHeaders(), Authorization: `Bearer ${apiKey}`, Accept: "image/*" },
-                responseType: "arraybuffer",
-              },
+          base64ForStorage = `data:image/png;base64,${response.data.data[0].b64_json}`;
+        } else if (targetProvider === "stability") {
+          if (selectedMedia?.data) {
+            // Image-to-Image or Edit request
+            const imageBuffer = Buffer.from(
+              selectedMedia.data.split(",")[1],
+              "base64",
             );
-            base64ForStorage = `data:image/png;base64,${Buffer.from(response.data, "binary").toString("base64")}`;
-            enhancedPrompt = `Background removed from reference image.`;
+
+            if (/remove background|erase background/i.test(cleanPrompt)) {
+              const form = new FormData();
+              form.append("image", imageBuffer, "source.png");
+              const response = await axios.post(
+                "https://api.stability.ai/v2beta/stable-image/edit/remove-background",
+                form,
+                {
+                  headers: { ...form.getHeaders(), Authorization: `Bearer ${apiKey}`, Accept: "image/*" },
+                  responseType: "arraybuffer",
+                },
+              );
+              base64ForStorage = `data:image/png;base64,${Buffer.from(response.data, "binary").toString("base64")}`;
+              enhancedPrompt = `Background removed from reference image.`;
+            } else {
+              // Generic Image-to-Image
+              const form = new FormData();
+              form.append("image", imageBuffer, "source.png");
+              form.append("prompt", enhancedPrompt);
+              form.append("negative_prompt", negativePrompt);
+              form.append("output_format", "png");
+              form.append("mode", "image-to-image");
+              form.append("strength", "0.65");
+              const response = await axios.post(
+                "https://api.stability.ai/v2beta/stable-image/generate/core",
+                form,
+                {
+                  headers: { ...form.getHeaders(), Authorization: `Bearer ${apiKey}`, Accept: "image/*" },
+                  responseType: "arraybuffer",
+                },
+              );
+              base64ForStorage = `data:image/png;base64,${Buffer.from(response.data, "binary").toString("base64")}`;
+            }
           } else {
-            // Generic Image-to-Image
+            // Text-to-Image
             const form = new FormData();
-            form.append("image", imageBuffer, "source.png");
             form.append("prompt", enhancedPrompt);
             form.append("negative_prompt", negativePrompt);
             form.append("output_format", "png");
-            form.append("mode", "image-to-image");
-            form.append("strength", "0.65");
+            form.append("aspect_ratio", stabilityRatio);
             const response = await axios.post(
               "https://api.stability.ai/v2beta/stable-image/generate/core",
               form,
@@ -1202,32 +1262,23 @@ if (type === "image") {
             );
             base64ForStorage = `data:image/png;base64,${Buffer.from(response.data, "binary").toString("base64")}`;
           }
-        } else {
-          // Text-to-Image
-          const form = new FormData();
-          form.append("prompt", enhancedPrompt);
-          form.append("negative_prompt", negativePrompt);
-          form.append("output_format", "png");
-          form.append("aspect_ratio", stabilityRatio);
-          const response = await axios.post(
-            "https://api.stability.ai/v2beta/stable-image/generate/core",
-            form,
-            {
-              headers: { ...form.getHeaders(), Authorization: `Bearer ${apiKey}`, Accept: "image/*" },
-              responseType: "arraybuffer",
-            },
-          );
-          base64ForStorage = `data:image/png;base64,${Buffer.from(response.data, "binary").toString("base64")}`;
-        }
-      } else if (provider === "pollinations") {
-        const seed = Math.floor(Math.random() * 1000000);
-pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?width=1024&height=1024&model=flux-schnell&nologo=true&embed=true&seed=${seed}`;
-      } else if (provider === "stablediffusion") {
-        const host = sdHost;
-        const cleanHost = host.replace(/\/+$/, "");
-          if (cleanHost.includes("5001") || cleanHost.includes("api/images")) {
+        } else if (targetProvider === "pollinations") {
+          const seed = Math.floor(Math.random() * 1000000);
+          const rawUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?width=1024&height=1024&model=flux-schnell&nologo=true&embed=true&seed=${seed}`;
+
+          try {
+            const response = await axios.get(rawUrl, { responseType: "arraybuffer", timeout: 30000 });
+            base64ForStorage = `data:image/jpeg;base64,${Buffer.from(response.data).toString("base64")}`;
+          } catch (e) {
+            console.warn("Pollinations fetch failed, returning raw URL fallback");
+            pollinationsUrl = rawUrl;
+          }
+        } else if (targetProvider === "stablediffusion") {
+          const host = sdHost;
+          const cleanHost = host.replace(/\/+$/, ""); // Ensure no trailing slash
+          if (!cleanHost.includes("7860")) { // Check if it's the Python service (assume 7860 is A1111)
             const startRes = await axios.post(
-              `${cleanHost}/python-api/images/generate`,
+              `${cleanHost}/sd-api/generate`, // Python service expects /sd-api/generate
               {
                 prompt: enhancedPrompt,
                 negative_prompt: negativePrompt,
@@ -1237,7 +1288,7 @@ pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enh
                 height,
                 return_base64: true,
               },
-              { headers: { Authorization: req.headers.authorization } }
+              { headers: { Authorization: req.headers.authorization }, timeout: 10000 }
             );
 
             // Always poll for completion - handles both immediate and queued responses
@@ -1250,25 +1301,36 @@ pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enh
 
               while (!isFinished && pollAttempts < MAX_POLL_ATTEMPTS) {
                 await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-                
+
                 try {
-                  const pollRes = await axios.get(
-                    `${cleanHost}/python-api/images/status/${taskId}`,
-                    { 
+                  const pollRes = await axios.get( // Python service expects /sd-api/status
+                    `${cleanHost}/sd-api/status/${taskId}`,
+                    {
                       headers: { Authorization: req.headers.authorization },
                       timeout: 10000  // 10s timeout per poll
                     }
                   );
 
                   const task = pollRes.data;
-                  
+
                   if (task.state === 'SUCCESS') {
                     if (task.result && task.result.image_base64) {
                       base64ForStorage = `data:image/png;base64,${task.result.image_base64}`;
                       console.log(`SD Image generated successfully after ${pollAttempts * 3}s`);
                       isFinished = true;
+                    } else if (task.result && task.result.imageUrl) {
+                      let imgUrl = task.result.imageUrl;
+                      if (imgUrl.startsWith("/python-api/")) {
+                        pollinationsUrl = imgUrl; // Already has the proxy prefix
+                      } else if (imgUrl.startsWith("/")) {
+                        pollinationsUrl = `/python-api${imgUrl}`; // Add proxy prefix
+                      } else {
+                        pollinationsUrl = imgUrl; // External URL
+                      }
+                      console.log(`SD Image available at URL: ${pollinationsUrl}`);
+                      isFinished = true;
                     } else {
-                      throw new Error('SUCCESS state but no image data returned');
+                      throw new Error('SUCCESS state but no image data or URL returned');
                     }
                   } else if (task.state === 'FAILURE') {
                     throw new Error(task.error || 'Generation failed in Python worker');
@@ -1281,10 +1343,10 @@ pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enh
                   }
                   console.warn(`Poll attempt ${pollAttempts + 1} failed:`, pollErr.message);
                 }
-                
+
                 pollAttempts++;
               }
-              
+
               if (!isFinished) {
                 throw new Error(`Stable Diffusion generation timed out after ${MAX_POLL_ATTEMPTS * 3 / 60}m`);
               }
@@ -1305,19 +1367,80 @@ pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enh
               height,
               sampler_name: "DPM++ 2M Karras",
               cfg_scale: 7,
-            });
+            }, { timeout: 60000 });
             base64ForStorage = `data:image/png;base64,${response.data.images[0]}`;
             console.log('A1111 SD image generated');
           }
+        }
+      };
+
+      try {
+        await runImageGen(provider);
+      } catch (err) {
+        console.warn(`AI Provider ${provider} failed: ${err.message}. Falling back to Pollinations...`);
+        if (provider !== "pollinations") {
+          try {
+            await runImageGen("pollinations");
+          } catch (pollErr) {
+            console.error("Pollinations fallback also failed:", pollErr.message);
+            throw new Error(`Both ${provider} and Pollinations fallback failed: ${pollErr.message}`);
+          }
+        } else {
+          throw err;
+        }
       }
+
+      let isPermanent = false;
+      // Attempt to upload the base64 image to the Python Media Storage Gateway
+      // so it becomes a short permanent URL and survives chat history reloads.
+      if (base64ForStorage) {
+        try {
+          const pythonUrl = process.env.PYTHON_INTERNAL_URL || process.env.PYTHON_URL || "http://localhost:5001";
+          const matches = base64ForStorage.match(/^data:(.+);base64,(.+)$/);
+          console.log("Base64 Match Result:", matches ? "Match found" : "No match");
+
+          if (matches && matches.length === 3) {
+            const mimeType = matches[1];
+            const base64Data = matches[2];
+            const buffer = Buffer.from(base64Data, "base64");
+            const ext = mimeType.split("/")[1] || "png";
+
+            const form = new FormData();
+            form.append("file", buffer, {
+              filename: `ai_gen_${Date.now()}.${ext}`,
+              contentType: mimeType,
+            });
+
+            const uploadRes = await axios.post(`${pythonUrl}/media/upload`, form, {
+              headers: { ...form.getHeaders(), Authorization: req.headers.authorization }
+            });
+
+            if (uploadRes.data && uploadRes.data.url) {
+              let finalCloudUrl = uploadRes.data.url;
+              if (finalCloudUrl.startsWith("/media/")) {
+                // Return relative path so Vite proxy and Nginx can intercept it
+                finalCloudUrl = `/python-api${finalCloudUrl}`;
+              }
+              pollinationsUrl = finalCloudUrl; // Use the returned short Cloud URL
+              base64ForStorage = null; // Clear base64 payload to prevent MongoDB bloating
+              isPermanent = true;
+            }
+          }
+        } catch (uploadErr) {
+          console.error("❌ Media Storage Upload Failed:", uploadErr.response?.data || uploadErr.message);
+          console.warn("Cloud upload failed, falling back to base64 blob");
+        }
+      }
+
+      const finalIsPermanent = isPermanent || (pollinationsUrl && (pollinationsUrl.includes("/media/") || pollinationsUrl.includes("/python-api/")));
 
       return ok(res, {
         type: "image",
         base64: base64ForStorage,
         url: pollinationsUrl,
-        provider,
-        enhancedPrompt,
-      });
+        isPermanent: !!finalIsPermanent
+      }, "AI media content generated");
+
     } else if (type === "video") {
       if (provider === "stability") {
         if (!selectedMedia || !selectedMedia.data)
@@ -1354,7 +1477,7 @@ pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enh
         // Long Polling performed securely on the backend
         let isFinished = false;
         let videoBuffer = null;
-        
+
         // ✅ Add a timeout and maximum poll count
         const MAX_POLL_ATTEMPTS = 24;   // 24 × 5s = 2 minutes max
         let pollAttempts = 0;
@@ -1378,9 +1501,37 @@ pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enh
           }
         }
         const base64 = Buffer.from(videoBuffer, "binary").toString("base64");
+
+        let finalVideoBase64 = `data:video/mp4;base64,${base64}`;
+        let videoStorageUrl = null;
+
+        // Attempt to upload the base64 video to the Python Media Storage Gateway
+        try {
+          const pythonUrl = process.env.PYTHON_INTERNAL_URL || process.env.PYTHON_URL || "http://localhost:5001";
+          const buffer = Buffer.from(base64, "base64");
+          const form = new FormData();
+          form.append("file", buffer, `ai_gen_${Date.now()}.mp4`);
+
+          const uploadRes = await axios.post(`${pythonUrl}/media/upload`, form, {
+            headers: { ...form.getHeaders(), Authorization: req.headers.authorization }
+          });
+
+          if (uploadRes.data && uploadRes.data.url) {
+            let finalCloudUrl = uploadRes.data.url;
+            if (finalCloudUrl.startsWith("/media/")) {
+              finalCloudUrl = `/python-api${finalCloudUrl}`;
+            }
+            videoStorageUrl = finalCloudUrl;
+            finalVideoBase64 = null; // Clear base64 payload to prevent MongoDB bloating
+          }
+        } catch (uploadErr) {
+          console.warn("Video cloud upload failed:", uploadErr.message);
+        }
+
         return ok(res, {
           type: "video",
-          base64: `data:video/mp4;base64,${base64}`,
+          base64: finalVideoBase64,
+          url: videoStorageUrl
         });
       }
     }
@@ -1394,5 +1545,89 @@ pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enh
       ? 'AI media request failed. Please try again later.'
       : errorDetail;
     return serverError(res, clientMessage);
+  }
+};
+
+export const getOllamaConfig = async (req, res) => {
+  try {
+    const accessCheck = await assertAiAccess(req);
+    if (accessCheck.error) return res.status(accessCheck.status).json({ message: accessCheck.message });
+    if (!["Admin", "HOD"].includes(req.user.role)) {
+      return badRequest(res, "Only Admin/HOD can access Ollama configuration");
+    }
+
+    const host = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
+    let models = [];
+    try {
+      const response = await axios.get(`${host}/api/tags`, { timeout: 5000 });
+      models = response.data.models || [];
+    } catch (e) {
+      console.warn("Could not reach Ollama host:", e.message);
+    }
+
+    return ok(res, { host, models }, "Ollama configuration fetched");
+  } catch (error) {
+    return serverError(res, error.message);
+  }
+};
+
+export const pullOllamaModel = async (req, res) => {
+  try {
+    const accessCheck = await assertAiAccess(req);
+    if (accessCheck.error) return res.status(accessCheck.status).json({ message: accessCheck.message });
+    if (!["Admin", "HOD"].includes(req.user.role)) {
+      return badRequest(res, "Only Admin/HOD can pull Ollama models");
+    }
+
+    const { model } = req.body || {};
+    if (!model) return badRequest(res, "Model name is required (e.g., 'llama3')");
+
+    const host = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
+
+    axios.post(`${host}/api/pull`, { name: model, stream: false })
+      .then(() => console.log(`Ollama model ${model} pulled successfully`))
+      .catch(e => console.error(`Failed to pull Ollama model ${model}:`, e.message));
+
+    return ok(res, { success: true, message: `Started pulling ${model} on ${host}` }, "Ollama pull initiated");
+  } catch (error) {
+    return serverError(res, error.message);
+  }
+};
+
+export const uploadUserVoice = async (req, res) => {
+  try {
+    if (!req.file) return badRequest(res, "Audio file is required");
+
+    const voiceDir = path.resolve(process.cwd(), 'uploads/voices');
+    if (!fs.existsSync(voiceDir)) {
+      fs.mkdirSync(voiceDir, { recursive: true });
+    }
+
+    const targetPath = path.join(voiceDir, `user_${req.user._id}.wav`);
+
+    // Use copy + unlink instead of rename to handle cross-partition moves
+    fs.copyFileSync(req.file.path, targetPath);
+    fs.unlinkSync(req.file.path);
+
+    ok(res, { path: `uploads/voices/user_${req.user._id}.wav` }, "Voice profile updated successfully");
+  } catch (error) {
+    console.error("Voice Upload Error:", error);
+    serverError(res, error.message);
+  }
+};
+
+export const checkServiceStatus = async (req, res) => {
+  const pythonUrl = process.env.PYTHON_INTERNAL_URL || process.env.PYTHON_URL || "http://localhost:5001";
+  try {
+    const response = await axios.get(`${pythonUrl}/health`, { timeout: 2000 });
+    return ok(res, {
+      python: { online: true, status: response.data.status },
+      env: process.env.NODE_ENV
+    }, "Service status check successful");
+  } catch (error) {
+    return ok(res, {
+      python: { online: false, error: error.message },
+      env: process.env.NODE_ENV
+    }, "Python service unreachable");
   }
 };

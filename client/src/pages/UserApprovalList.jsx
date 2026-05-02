@@ -92,7 +92,7 @@ export default function UserApprovalList() {
       window.dispatchEvent(new CustomEvent("showToast", { detail: `User updated to ${newStatus} ✅` }));
     } catch (err) {
       console.error(`Error updating user status to ${newStatus}:`, err);
-      const msg = `Failed to update user to ${newStatus}.`;
+      const msg = err.response?.data?.message || `Failed to update user to ${newStatus}.`;
       setError(msg);
       window.dispatchEvent(new CustomEvent("showToast", { detail: `${msg} ❌` }));
     }
@@ -313,7 +313,7 @@ export default function UserApprovalList() {
       window.dispatchEvent(new CustomEvent("showToast", { detail: `Bulk semester update complete ✅` }));
     } catch (err) {
       console.error(`Error bulk updating semester:`, err);
-      const msg = `Failed to process bulk semester update.`;
+      const msg = err.response?.data?.message || `Failed to process bulk semester update.`;
       setError(msg);
       window.dispatchEvent(new CustomEvent("showToast", { detail: `${msg} ❌` }));
     }

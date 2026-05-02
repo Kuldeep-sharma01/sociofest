@@ -1,7 +1,6 @@
 // server/controllers/postController.js
 import Post from "../models/Post.js";
 import User from "../models/User.js";
-import Event from "../models/Event.js";
 import {
   processUpload,
   extractMediaFromText,
@@ -351,13 +350,6 @@ if (contentItem.author.toString() !== req.user._id.toString()) {
     }
   }
 }
-    // Author check
-    if (
-      contentItem.author.toString() !== req.user._id.toString() &&
-      !["Admin", "HOD"].includes(req.user.role)
-    ) {
-      return forbidden(res, "Not authorized to edit this content");
-    }
 
     let mat = contentItem.material;
     if (title !== undefined) {
@@ -478,6 +470,10 @@ if (contentItem.author.toString() !== req.user._id.toString()) {
         }
       }
 
+      // ✅ CLEANUP: Delete old media documents and files to prevent orphan "garbage" data
+      if (mat.media?.length > 0) {
+        await deleteMediaDocs(mat.media);
+      }
       mat.media = newMediaIds;
     }
 

@@ -20,7 +20,7 @@ const curriculumSchema = new mongoose.Schema(
       required: true,
     },
     semester: {
-      type: String,
+      type: Number,
     },
     subjectId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -59,6 +59,16 @@ const curriculumSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    schedule: [
+      {
+        day: {
+          type: String,
+          enum: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        },
+        startTime: String, // "HH:mm"
+        endTime: String,   // "HH:mm"
+      }
+    ]
   },
   { timestamps: true },
 );

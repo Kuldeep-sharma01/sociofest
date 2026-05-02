@@ -22,6 +22,8 @@ import {
   updateStudentSemester,
   addEmail,
   verifyNewEmail,
+  resendNewEmailOTP,
+  clearFaceRegistration,
 } from "../controllers/userController.js";
 import { protect } from "../middleware/authMiddleware.js";
 import { roleCheck } from "../middleware/roleCheck.js";
@@ -79,6 +81,7 @@ router.post("/verify-email", protect, [
   body("email").isEmail().normalizeEmail().withMessage("Please provide a valid email address"),
   body("otp").isLength({ min: 6, max: 6 }).isNumeric().withMessage("OTP must be exactly 6 digits")
 ], validateRequest, verifyNewEmail);
+router.post("/resend-email-otp", protect, resendNewEmailOTP);
 
 // Department and subject related routes
 router.get("/departments", getDepartments);
@@ -137,9 +140,10 @@ router.put(
  */
 router.get("/:id",           protect,                                                 getUserById);
 router.put("/:id",           protect, updateUserValidation, validateRequest,          updateUser);
-router.put("/:id/status",    protect, roleCheck([ROLES.ADMIN, ROLES.HOD]),            updateUserStatus);
+router.put("/:id/status",    protect, roleCheck([ROLES.ADMIN, ROLES.HOD, ROLES.TEACHER]), updateUserStatus);
 router.put("/:id/role",      protect, roleCheck([ROLES.ADMIN]),                       updateUserRole);
 router.put("/:id/password",  protect,                                                 changePassword);
+router.post("/:id/clear-face", protect,                                                clearFaceRegistration);
 router.put("/:id/semester",  protect, roleCheck([ROLES.ADMIN, ROLES.HOD, ROLES.TEACHER]), updateStudentSemester);
 router.delete("/:id",        protect, roleCheck([ROLES.ADMIN]),                       deleteUser);
 

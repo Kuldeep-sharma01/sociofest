@@ -8,6 +8,7 @@ import util from "util";
 import Media from "../models/Media.js";
 import { fileTypeFromBuffer } from "file-type";
 import { allowedMimeTypes } from "../middleware/uploadMiddleware.js";
+import logger from "./logger.js";
 
 const execFileAsync = util.promisify(execFile);
 

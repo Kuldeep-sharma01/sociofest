@@ -23,6 +23,7 @@ BACKEND_TYPES = {
     'aws_s3': 'AWS S3',
     'azure_blob': 'Azure Blob Storage',
     'huggingface': 'HuggingFace Hub (read-only)',
+    'cloudinary': 'Cloudinary CDN',
 }
 
 MIN_REQUIRED_STORES = 1  # at least local must succeed
@@ -232,6 +233,8 @@ class StorageManager:
                 self.backends['azure_blob'] = AzureBlobBackend(backend)
             elif backend.type == 'huggingface':
                 self.backends['huggingface'] = HuggingFaceBackend(backend)
+            elif backend.type == 'cloudinary':
+                self.backends['cloudinary'] = CloudinaryBackend(backend)
     
     def get_model(self, model_name: str, model_size_gb: float = None) -> Tuple[str, str]:
         """
@@ -583,6 +586,44 @@ class HuggingFaceBackend:
         _hf_health_cache.update({'result': ok, 'at': now})
         return ok
     
+    def get_available_space(self) -> float:
+        return float('inf')
+
+
+class CloudinaryBackend:
+    """Cloudinary backend primarily for media storage"""
+    
+    def __init__(self, backend: StorageBackend):
+        self.backend = backend
+        self.configured = False
+        self._init_client()
+    
+    def _init_client(self):
+        try:
+            import cloudinary
+            config = self.backend.config
+            if not config.get('cloud_name') or not config.get('api_key') or not config.get('api_secret'):
+                logger.info("Cloudinary credentials not configured — skipping Cloudinary backend init")
+                return
+            cloudinary.config(
+                cloud_name=config.get('cloud_name'),
+                api_key=config.get('api_key'),
+                api_secret=config.get('api_secret')
+            )
+            self.configured = True
+        except Exception as e:
+            logger.error(f"Failed to init Cloudinary: {e}")
+
+    def get_model(self, model_name: str) -> Optional[str]:
+        # Cloudinary isn't typically used for large .safetensors models
+        return None
+        
+    def store_model(self, model_name: str, model_path: str, file_size_gb: float) -> bool:
+        return False
+        
+    def is_healthy(self) -> bool:
+        return self.configured
+        
     def get_available_space(self) -> float:
         return float('inf')
 

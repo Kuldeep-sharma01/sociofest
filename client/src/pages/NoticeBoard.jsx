@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
+import { format } from "date-fns";
 import { createPortal } from "react-dom";
 import {
   getNotices,
@@ -325,9 +326,7 @@ export const NoticeBoard = () => {
   const formatDateForInput = (date) => {
     if (!date) return "";
     const d = new Date(date);
-    return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-      .toISOString()
-      .slice(0, 16);
+    return format(d, "yyyy-MM-dd'T'HH:mm");
   };
 
   const handleEventFileSelect = (e) => {

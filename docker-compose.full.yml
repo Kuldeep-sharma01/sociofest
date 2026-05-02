@@ -23,12 +23,13 @@ services:
     env_file:
       - ./server/.env
     environment:
-      - MONGODB_URI=mongodb://mongodb:27017/smart-attendance
+      - MONGODB_URI=mongodb://mongodb:27017/sociofestdb
       - NODE_ENV=production
-      - PYTHON_API_URL=http://python-service:5001
-      - VOICE_AI_URL=http://voice-ai:8000
-      - CUSTOM_AI_URL=http://voice-ai:8000/clone-voice
-      - CLIENT_URL=http://localhost,http://127.0.0.1
+      - PYTHON_INTERNAL_URL=http://python-service:5001 # Internal Docker service name
+      - VOICE_AI_URL=http://voice-ai:8000 # Internal Docker service name
+      - SD_API_URL=http://sd-webui:7860 # Internal Docker service name
+      - COMPILER_TEST_URL=http://judge0-mono:2358 # Internal Docker service name
+      - FRONTEND_URL=http://localhost,http://127.0.0.1 # For local Docker dev CORS
     volumes:
       - backend_uploads:/app/uploads
     depends_on:
@@ -36,8 +37,6 @@ services:
         condition: service_healthy
       python-service:
         condition: service_healthy
-      voice-ai:
-        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:5000/health" ]
@@ -53,7 +52,7 @@ services:
     env_file:
       - ./server/python_modules/.env
     environment:
-      - MONGODB_URI=mongodb://mongodb:27017/smart-attendance
+      - MONGODB_URI=mongodb://mongodb:27017/sociofestdb #
     volumes:
       - python_models:/app/model_cache
     depends_on:
@@ -66,11 +65,15 @@ services:
       timeout: 10s
       retries: 3
 
+  # Voice AI — optional, requires heavy ML deps. Opt-in with:
+  #   docker compose -f docker-compose.full.yml --profile voice up -d
   voice-ai:
     build:
       context: ./server/python_modules
       dockerfile: Dockerfile.voice
     container_name: sociofest-voice-ai
+    profiles:
+      - voice
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -78,11 +81,6 @@ services:
   nginx:
     build:
       context: ./client
-      args:
-        - CLIENT_URL=/api
-        - PYTHON_API_URL=/python-api
-        - VITE_VOICE_API_URL=/voice-api
-        - VITE_SD_API_URL=/sd-api
     container_name: sociofest-nginx
     ports:
       - "80:80"
@@ -96,6 +94,8 @@ services:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     restart: unless-stopped
 
+  # Stable Diffusion — optional, requires NVIDIA GPU. Opt-in with:
+  #   docker compose -f docker-compose.full.yml --profile gpu up -d
   sd-webui:
     image: ghcr.io/abdulrhmn/sd-webui:latest
     container_name: sociofest-sd

@@ -54,7 +54,7 @@ export const cloneVoice = async (text, language, audioFile, config = {}) => {
   formData.append("text", text);
   formData.append("language", language);
   formData.append("speaker_wav", audioFile);
-  const res = await apiClient.post(`/voice-api/clone-voice`, formData, {
+  const res = await pythonClient.post(`/voice-api/clone-voice`, formData, {
     responseType: "blob",
     ...config,
   });
@@ -82,9 +82,34 @@ export const generateContent = async (data, config = {}) => {
  * @param {Object} config - Axios config options
  * @returns {Promise<Object>} { verified, confidence, userId }
  */
-export const verifyFace = async (imageFile, config = {}) => {
-  const formData = buildSmartFormData("image", imageFile);
-  const res = await pythonClient.post(`/python-api/verify-face`, formData, config);
+export const verifyFace = async (imageFile, userId, config = {}) => {
+  const formData = buildSmartFormData("image", imageFile, {
+    userId,
+    clientLivenessVerified: "true",
+  });
+  const res = await pythonClient.post(`/verify-face`, formData, config);
+  return res.data;
+};
+
+/**
+ * Register face recognition for a user
+ */
+export const registerFace = async (imageFile, userId, config = {}) => {
+  const formData = buildSmartFormData("image", imageFile, {
+    userId,
+    clientLivenessVerified: "true",
+  });
+  const res = await pythonClient.post(`/register-face`, formData, config);
+  return res.data;
+};
+
+/**
+ * Assess face quality for registration
+ */
+export const assessFace = async (imageFile, config = {}) => {
+  const formData = new FormData();
+  formData.append("image", imageFile);
+  const res = await pythonClient.post(`/assess-face`, formData, config);
   return res.data;
 };
 
@@ -101,6 +126,22 @@ export const getServiceStatus = async (config = {}) => {
     if (error.name === "CanceledError") throw error; // Re-throw cancellations
     return { status: "offline", error: error.message };
   }
+};
+
+/**
+ * Get detailed health status from Python AI microservice
+ */
+export const getPythonHealth = async (config = {}) => {
+  const res = await pythonClient.get("/health", config);
+  return res.data;
+};
+
+/**
+ * Toggle AI hardware between CPU and GPU
+ */
+export const toggleHardware = async (device, config = {}) => {
+  const res = await pythonClient.post("/toggle-hardware", { device }, config);
+  return res.data;
 };
 
 /**
@@ -156,9 +197,13 @@ export default {
   cloneVoice,
   generateContent,
   verifyFace,
+  registerFace,
+  assessFace,
   getStatus: getServiceStatus,
   textToSpeech,
   analyzeImage,
   detectObjects,
   extractText: extractTextFromImage,
+  getPythonHealth,
+  toggleHardware,
 };

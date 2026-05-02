@@ -72,6 +72,7 @@ export const createSubject = async (req, res, next) => {
       semester: Number(semester),
       description: String(description || '').trim(),
       department: dept._id,
+      assignedTeacher: assignedTeacher || [],
     });
     // Add to dept.subjects ref array:
     dept.subjects.push(subject._id);
@@ -243,13 +244,13 @@ export const updateSubject = async (req, res, next) => {
     if (code !== undefined) subject.code = code;
     if (description !== undefined) subject.description = description;
 
-    let newTeachers = oldTeachers;
     if (assignedTeacher !== undefined) {
-      newTeachers = Array.isArray(assignedTeacher)
+      const newTeachers = Array.isArray(assignedTeacher)
         ? assignedTeacher.map((id) => String(id))
         : assignedTeacher
           ? [String(assignedTeacher)]
           : [];
+      subject.assignedTeacher = newTeachers;
     }
 
     await subject.save();
@@ -300,7 +301,9 @@ export const updateSubject = async (req, res, next) => {
 
     // ORPHAN BUG FIX: Transfer ownership of Materials, Assignments, and Quizzes to the new teacher
     if (removed.length > 0) {
-      const newOwnerId = req.user._id;
+      // Logic: If a new teacher was added, they become the owner. 
+      // If multiple added, pick the first. If none added, fallback to the requester (HOD/Admin).
+      const newOwnerId = added.length > 0 ? added[0] : req.user._id;
       const removedIds = removed.map((id) => new mongoose.Types.ObjectId(id));
 
       const Assignment = mongoose.model("Assignment");
@@ -476,6 +479,13 @@ export const assignTeacherToSubject = async (req, res, next) => {
       { $addToSet: { subjects: subject._id } },
       { upsert: true }
     );
+
+    // Bidirectional sync: Update Subject
+    await Subject.updateOne(
+      { _id: subject._id },
+      { $addToSet: { assignedTeacher: teacherId } }
+    );
+
     if (result.matchedCount === 0) {
       console.warn(`Teacher profile not found for userId ${teacherId} — skipping subject assignment`);
     }

@@ -1,4 +1,5 @@
 import React from "react";
+import { useSelector } from "react-redux";
 import Subject from "../../components/subject";
 import { useTheme } from "@/context/ThemeContext";
 import { getOptionClasses } from "@/utils/themeUtils";
@@ -8,8 +9,10 @@ const StudentForm = ({
   totalSemesters,
   studentSubjects,
   department,
+  isEditMode,
 }) => {
   const { appTheme, isDark } = useTheme();
+  const currentUser = useSelector((state) => state.auth.user);
 
   // ✅ Show a loading state instead of a stale fallback
   const semesters =
@@ -64,9 +67,13 @@ const StudentForm = ({
           value={studentData.semester}
           onChange={handleSemesterChange}
           required
-          className="w-full px-3 py-2 border border-inherit/30 rounded-lg bg-black/5 dark:bg-white/5 text-inherit focus:outline-none focus:ring-2 focus:ring-current transition-colors"
+          disabled={
+            totalSemesters === 0 || 
+            (isEditMode && currentUser?.role === 'Student' && !!studentData.semester && studentData.semester !== 0)
+          }
+          className="w-full px-3 py-2 border border-inherit/30 rounded-lg bg-black/5 dark:bg-white/5 text-inherit focus:outline-none focus:ring-2 focus:ring-current transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <option value="" className={getOptionClasses(appTheme, isDark)}>
+          <option value="" disabled hidden className={getOptionClasses(appTheme, isDark)}>
             {totalSemesters === 0 ? "Select Department First" : "Select Semester"}
           </option>
 

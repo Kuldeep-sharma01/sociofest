@@ -218,7 +218,7 @@ const Marketplace = () => {
     <div className="max-w-6xl mx-auto p-4 sm:p-6 flex flex-col gap-6 animate-in fade-in duration-500">
       {/* Header Banner */}
       <div
-        className={`${getBannerThemeClasses(appTheme, "bg-gradient-to-r from-teal-500 to-emerald-600 text-white")} rounded-3xl p-8 shadow-lg relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors`}
+        className={`${getBannerThemeClasses(appTheme, "bg-gradient-to-r from-red-500 to-red-600 text-white")} rounded-3xl p-8 shadow-lg relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors`}
       >
         <div className="absolute top-0 right-0 opacity-10 transform translate-x-10 -translate-y-10">
           <ShoppingBag className="w-64 h-64" />

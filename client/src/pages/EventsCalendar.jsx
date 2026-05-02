@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
+import { format } from "date-fns";
 import { Calendar, momentLocalizer } from "react-big-calendar";
 import moment from "moment";
 import {
@@ -81,6 +82,9 @@ const EventsCalendar = () => {
   // Fetch events from backend
   useEffect(() => {
     // When user is identified as a student, default their category to Personal
+    // ONLY for new events, not when editing
+    if (isEditingId) return;
+
     if (user?.role === "Student") {
       setNewEvent((prev) => ({
         ...prev,
@@ -94,7 +98,7 @@ const EventsCalendar = () => {
         isPrivate: false,
       }));
     }
-  }, [user?.role]);
+  }, [user?.role, isEditingId]);
 
   useEffect(() => {
     const fetchEvents = async () => {
@@ -126,9 +130,7 @@ const EventsCalendar = () => {
   const formatDateForInput = (date) => {
     if (!date) return "";
     const d = new Date(date);
-    return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-      .toISOString()
-      .slice(0, 16);
+    return format(d, "yyyy-MM-dd'T'HH:mm");
   };
 
   const handleEventFileSelect = (e) => {
@@ -272,28 +274,41 @@ const EventsCalendar = () => {
     }
   };
 
+  // Sync form with editing event
+  useEffect(() => {
+    if (isEditingId) {
+      const event = events.find((e) => e._id === isEditingId);
+      if (event) {
+        setNewEvent({
+          title: event.title || "",
+          description: event.material?.description || event.description || "",
+          start: formatDateForInput(event.start),
+          end: formatDateForInput(event.end),
+          category: event.category || "Other",
+          location: event.location || "",
+          isPrivate: event.isPublic === false,
+          media: event.material?.media || event.media || [],
+        });
+      }
+    }
+  }, [isEditingId, events]);
+
   // Populate form for editing
   const handleEditClick = (event) => {
-    setNewEvent({
-      title: event.title,
-      description: event.description || "",
-      start: formatDateForInput(event.start),
-      end: formatDateForInput(event.end),
-      category: event.category,
-      location: event.location || "",
-      isPrivate: !event.isPublic,
-      media: event.media || [],
-    });
-    setEventAttachments([]);
-    setIsEditingId(event._id);
-    setSelectedEvent(null); // Close modal
-    // Optionally scroll to form
+    if (!event) return;
+    const eventId = event._id || event;
+    setSelectedEvent(null);
+    setIsEditingId(eventId);
+
+    // Scroll to form
     setTimeout(() => {
-      (document.getElementById("main-scroll-container") || window).scrollTo({
-        top: 0,
+      const container =
+        document.getElementById("main-scroll-container") || window;
+      container.scrollTo({
+        top: document.body.scrollHeight,
         behavior: "smooth",
       });
-    }, 50);
+    }, 100);
   };
 
   const handleCancelEdit = () => {

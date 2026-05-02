@@ -1,65 +1,84 @@
-# Core backend dependencies
+# SocioFest AI Backend Dependencies
+# --------------------------------
+
+# Core Flask & API Infrastructure
 flask==3.0.3
 flask-cors==4.0.1
-opencv-python-headless==4.10.0.84
-pillow==10.4.0
-pymongo==4.8.0
-pyjwt==2.9.0
-python-dotenv==1.0.1
-numpy>=1.26.4,<2.0.0 
-Cython==0.29.36
-celery==5.4.0
-redis==5.2.0
-requests==2.32.3
-accelerate==0.34.2
-
-# TensorFlow face recognition service
-tensorflow-cpu==2.14.0
-tensorflow-hub==0.14.0
-protobuf>=4.25.8,<5.0.0
-
-# Stable Diffusion Image Generation
-diffusers==0.23.1
-safetensors==0.4.1
-
-# Google Drive integration for model management
-google-auth==2.25.2
-google-auth-oauthlib>=0.5,<1.1
-google-auth-httplib2==0.2.0
-google-api-python-client==2.105.0
-
-# AWS S3 integration
-boto3==1.28.85
-urllib3<2.1
-
-# Azure Blob Storage integration
-azure-storage-blob==12.19.0
-
-# Voice AI service dependencies
+waitress==3.0.0
 fastapi==0.115.0
 uvicorn==0.30.1
 pydantic==2.9.2
 python-multipart==0.0.20
-deep-translator==1.11.4
-TTS==0.22.0
-scipy<1.13.0
-transformers>=4.34.0
-huggingface-hub>=0.23.2,<1.0.0
-openai-whisper==20231117
-soundfile==0.12.1
+python-dotenv==1.0.1
+pyjwt==2.9.0
+cryptography==42.0.5
+requests==2.32.3
+urllib3<2.1
 
-# PyTorch runtime for Coqui TTS and Diffusers
+# Database & Task Queue
+pymongo==4.8.0
+redis==5.2.0
+celery==5.4.0
+
+# Image Processing & Computer Vision
+opencv-python-headless==4.10.0.84
+pillow==10.4.0
+tensorflow-cpu==2.14.0
+tensorflow-hub==0.14.0
+protobuf>=4.25.8,<5.0.0
+
+# Generative AI (Images)
+diffusers==0.29.2
+transformers==4.44.2
+accelerate==0.34.2
+safetensors>=0.4.3
+huggingface-hub>=0.23.2,<1.0.0
+
+# Generative AI (Voice & Audio)
+# NOTE: Whisper handles STT (Speech-to-Text)
+openai-whisper==20231117
+TTS==0.22.0
+deep-translator==1.11.4
+soundfile==0.12.1
+pydub==0.25.1
+ffmpeg-python==0.2.0
+librosa==0.10.1
+scipy==1.11.4
+numba==0.58.1
+llvmlite==0.41.1
+
+# Multi-Cloud Storage Backends
+google-auth==2.25.2
+google-auth-oauthlib>=0.5,<1.1
+google-auth-httplib2==0.2.0
+google-api-python-client==2.105.0
+boto3==1.28.85
+azure-storage-blob==12.19.0
+cloudinary==1.38.0
+
+# Monitoring & Data Utilities
+psutil==5.9.8
+gputil==1.4.0
+numpy>=1.26.4,<2.0.0 
+pandas==1.5.3
+matplotlib==3.8.1
+Cython==0.29.36
+setuptools<70.0.0
+wheel
+
+# ────────────────────────────────────────────────────────────────────────
+# PYTORCH RUNTIME (CPU Default)
+# ────────────────────────────────────────────────────────────────────────
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.4.1+cpu
 torchaudio==2.4.1+cpu
+torchvision==0.19.1+cpu
 
-# Utility scripts
-pandas==1.5.3
-matplotlib==3.8.1
-
-# Production server for Flask
-waitress==3.0.0
-
-# Packaging helper to avoid build-time setuptools conflicts
-setuptools<70.0.0
-wheel
+# ────────────────────────────────────────────────────────────────────────
+# OPTIONAL CUDA SUPPORT (GPU Acceleration)
+# Uncomment these and comment out the CPU section above to enable GPU speed.
+# ────────────────────────────────────────────────────────────────────────
+# --extra-index-url https://download.pytorch.org/whl/cu121
+# torch==2.4.1+cu121
+# torchaudio==2.4.1+cu121
+# torchvision==0.19.1+cu121

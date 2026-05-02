@@ -832,7 +832,9 @@ const StudyHub = () => {
   const paginatedContent = useMemo(() => displayedContent.slice(0, visibleCount), [displayedContent, visibleCount]);
 
   return (
-    <div className="max-w-5xl mx-auto p-4 sm:p-6 flex flex-col gap-8 animate-in fade-in duration-500">
+    <div className="w-full h-full bg-transparent">
+      <div className="min-h-full w-full">
+        <div className="max-w-5xl mx-auto pt-6 pb-20 px-4 sm:px-6 flex flex-col gap-8">
       {viewerFile && createPortal(
         <div className="fixed inset-0 z-[9999]">
           <DocumentViewer
@@ -948,7 +950,7 @@ const StudyHub = () => {
             <div
               key={folder.name}
               onClick={() => setSelectedFolder(folder.name)}
-              className={`p-6 rounded-2xl shadow-sm hover:shadow-md border cursor-pointer hover:-translate-y-1 transition-all group flex flex-col items-center text-center ${getCardThemeClasses(appTheme)}`}
+              className={`p-8 rounded-3xl shadow-sm hover:shadow-2xl border border-inherit/10 cursor-pointer hover:-translate-y-2 transition-all duration-500 group flex flex-col items-center text-center relative overflow-hidden backdrop-blur-sm ${getCardThemeClasses(appTheme)}`}
             >
               <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110 shadow-sm ${activeTab === 'Lectures' ? 'bg-blue-500/10 text-blue-500 border border-blue-500/20' : 'bg-orange-500/10 text-orange-500 border border-orange-500/20'}`}>
                 <Library className="w-8 h-8" />
@@ -1251,6 +1253,8 @@ const StudyHub = () => {
         users={shareUsers}
         onShare={handleSendShare}
       />
+        </div>
+      </div>
     </div>
   );
 };

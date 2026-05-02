@@ -11,6 +11,10 @@ import {
   getAiRuntimeConfig,
   upsertAiRuntimeConfig,
   previewSourceEdit,
+  getOllamaConfig,
+  pullOllamaModel,
+  uploadUserVoice,
+  checkServiceStatus,
 } from "../controllers/aiController.js";
 import upload from "../middleware/uploadMiddleware.js";
 import { protect } from "../middleware/authMiddleware.js";
@@ -24,21 +28,7 @@ const router = express.Router();
  * Service Status
  */
 
-/**
- * @route   GET /api/ai/status
- * @desc    Get AI service status and available features
- * @access  Public
- */
-router.get("/status", (req, res) => {
-  ok(res, {
-    status: "online",
-    version: "1.0.0",
-    features: [
-      "translation", "transcription", "content-generation", 
-      "text-to-speech", "image-analysis"
-    ]
-  }, 'AI service is online');
-});
+// Status route moved to the end of the file for better consolidation with Python health checks
 
 /**
  * Translation and Media Processing
@@ -142,5 +132,21 @@ router.post(
   activityLoggerMiddleware("AI_SOURCE_EDIT_PREVIEW"),
   previewSourceEdit,
 );
+
+/**
+ * @route   GET /api/ai/ollama/config
+ * @desc    Get Ollama configuration and installed models
+ * @access  Private/Admin
+ */
+router.get("/ollama/config", protect, roleCheck(["Admin", "HOD"]), getOllamaConfig);
+
+/**
+ * @route   POST /api/ai/ollama/pull
+ * @desc    Pull an Ollama model to the host
+ * @access  Private/Admin
+ */
+router.post("/ollama/pull", protect, roleCheck(["Admin", "HOD"]), pullOllamaModel);
+router.post("/upload-voice", protect, upload.single("audio"), uploadUserVoice);
+router.get("/status", checkServiceStatus);
 
 export default router;

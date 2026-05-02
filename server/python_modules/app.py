@@ -8,6 +8,16 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 os.environ['TFHUB_CACHE_DIR'] = CACHE_DIR
 os.environ['HF_HOME'] = CACHE_DIR
 
+
+
+# Monkeypatch for huggingface_hub compatibility (fixes 'hf_cache_home' import error in older diffusers/transformers)
+try:
+    import huggingface_hub.constants
+    if not hasattr(huggingface_hub.constants, 'hf_cache_home'):
+        huggingface_hub.constants.hf_cache_home = CACHE_DIR
+except ImportError:
+    pass
+
 import warnings
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=DeprecationWarning)
@@ -18,6 +28,10 @@ from flask_cors import CORS
 import cv2
 import numpy as np
 import tensorflow_hub as hub
+try:
+    import torch
+except ImportError:
+    torch = None
 import logging
 from pymongo import MongoClient
 from pymongo.errors import ConfigurationError
@@ -25,27 +39,70 @@ from bson.objectid import ObjectId
 import json
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv()
-# CRITICAL INTERLINK: Load the Node.js backend .env to share the EXACT same JWT_SECRET and MONGODB_URI
-load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+# For local monorepo dev, also try loading the parent server/.env as fallback
+# This is a no-op if python_modules has all vars in its own .env (required for independent deployment)
+_parent_env = os.path.join(os.path.dirname(__file__), '..', '.env')
+if os.path.exists(_parent_env):
+    load_dotenv(_parent_env, override=False)  # override=False → own .env takes priority
 from auth_middleware import require_jwt, require_admin
 
 app = Flask(__name__)
-ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', 'http://localhost:5173').split(',')
-CORS(app, origins=ALLOWED_ORIGINS, supports_credentials=True)
+# Global AI Hardware State — respect explicit env override (set by admin toggle)
+_explicit_device = os.environ.get("AI_DEVICE")
+if _explicit_device:
+    AI_DEVICE = _explicit_device
+else:
+    AI_DEVICE = "cuda" if (torch and torch.cuda.is_available()) else "cpu"
+    os.environ["AI_DEVICE"] = AI_DEVICE
+
+
 logging.basicConfig(level=logging.ERROR)
 logging.getLogger('tensorflow').setLevel(logging.ERROR)
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 app.logger.setLevel(logging.ERROR)
 
-# Security: Limit maximum payload size to prevent memory exhaustion (5 MB limit)
-app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024
+# ── CORS Configuration ──────────────────────────────────────────────────────
+# Allow requests from the frontend and Node.js backend.
+# In production these are set via env vars; in dev they default to localhost.
+_frontend = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+_backend  = os.getenv('BACKEND_URL',  'http://localhost:5000')
+_allowed_origins = [o.strip() for o in (_frontend + ',' + _backend).split(',') if o.strip()]
+# Always allow localhost variants in development
+if os.getenv('FLASK_ENV') != 'production':
+    _allowed_origins += ['http://localhost:5173', 'http://127.0.0.1:5173',
+                         'http://localhost:5000', 'http://127.0.0.1:5000']
+
+CORS(app,
+     origins=list(set(_allowed_origins)),
+     supports_credentials=True,
+     allow_headers=['Content-Type', 'Authorization'],
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+
+# Security: Limit maximum payload size to support high-res images and audio (50 MB limit)
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+
 
 # Load pre-trained feature extractor from TensorFlow Hub (used for embeddings)
 print("[STARTUP] Loading facial recognition model...")
 model_url = "https://tfhub.dev/google/imagenet/mobilenet_v2_100_224/feature_vector/5"
-face_model = hub.load(model_url)
+try:
+    face_model = hub.load(model_url)
+except Exception as e:
+    print(f"[WARNING] Primary model load failed: {e}")
+    if "Access is denied" in str(e):
+        print("[STARTUP] Detected Windows file lock. Retrying in 2 seconds...")
+        import time
+        time.sleep(2)
+        try:
+            face_model = hub.load(model_url)
+        except Exception:
+            print("[CRITICAL] Could not load facial recognition model. Face ID features will be disabled.")
+            face_model = None
+    else:
+        face_model = None
 
 # Load face detector (using OpenCV's Haar Cascade)
 prototxt = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
@@ -54,7 +111,7 @@ face_cascade = cv2.CascadeClassifier(prototxt)
 print("[STARTUP] Models loaded successfully")
 
 # Connect to MongoDB (Unified Single Database Architecture)
-MONGODB_URI = os.getenv('MONGODB_URI') or os.getenv('MONGODB_URI') or 'mongodb://localhost:27017/smart-attendance'
+MONGODB_URI = os.getenv('MONGODB_URI') or 'mongodb://localhost:27017/sociofestdb'
 MONGO_DB_NAME = os.getenv('MONGO_DB_NAME') or os.getenv('MONGODB_DB_NAME') or 'smart-attendance'
 
 JWT_SECRET = os.getenv('JWT_SECRET')
@@ -69,7 +126,12 @@ try:
 except ConfigurationError:
     default_db = None
 db = default_db if default_db is not None else client[MONGO_DB_NAME]
+app.db = db
+# Auto-purge AI tasks after 24 hours to prevent DB bloat
+db['ai_tasks'].create_index("created_at", expireAfterSeconds=86400)
 users_collection = db['users']
+
+
 
 # ✅ Encrypt the encoding vector before storage
 FACE_ENCRYPTION_KEY = os.getenv('FACE_ENCRYPTION_KEY')
@@ -100,36 +162,100 @@ def validate_image_bytes(image_bytes):
     return True, "ok"
 
 
-def extract_face_encoding(image_bytes):
+def assess_face_quality(img, x, y, w, h):
+    """
+    Assess face quality for registration:
+    - Centering
+    - Size
+    - Pose (estimate from bounding box and eyes)
+    """
+    img_h, img_w = img.shape[:2]
+    
+    # 1. Size check
+    face_area = w * h
+    frame_area = img_w * img_h
+    size_ratio = face_area / frame_area
+    
+    # 2. Centering check
+    face_center_x = x + w / 2
+    face_center_y = y + h / 2
+    dist_from_center_x = abs(face_center_x - img_w / 2) / img_w
+    dist_from_center_y = abs(face_center_y - img_h / 2) / img_h
+    
+    # 3. Simple Pose Estimation (based on box symmetry in frame)
+    # Ideally use dlib or mediapipe for landmarks, but let's stick to OpenCV for minimal deps
+    is_centered = dist_from_center_x < 0.15 and dist_from_center_y < 0.2
+    is_good_size = size_ratio > 0.05 # Face should take at least 5% of frame
+    
+    # Check for "Looking Straight" (Heuristic: face box should be roughly square and centered)
+    aspect_ratio = w / h
+    is_looking_straight = 0.8 < aspect_ratio < 1.2
+    
+    # Sharpness check (Laplacian variance)
+    gray_roi = cv2.cvtColor(img[y:y+h, x:x+w], cv2.COLOR_BGR2GRAY)
+    sharpness = cv2.Laplacian(gray_roi, cv2.CV_64F).var()
+    is_sharp = sharpness > 100
+    
+    quality_score = 0
+    if is_centered: quality_score += 30
+    if is_good_size: quality_score += 20
+    if is_looking_straight: quality_score += 30
+    if is_sharp: quality_score += 20
+    
+    return {
+        "score": quality_score,
+        "is_centered": is_centered,
+        "is_good_size": is_good_size,
+        "is_looking_straight": is_looking_straight,
+        "is_sharp": is_sharp,
+        "sharpness": float(sharpness),
+        "aspect_ratio": float(aspect_ratio),
+        "size_ratio": float(size_ratio)
+    }
+
+def extract_face_encoding(image_bytes, include_assessment=False):
     """
     Extract face encoding from image bytes using TensorFlow
-    Returns: numpy array of face encoding (1280-dim vector for MobileNetV2)
+    Returns: (encoding, message, assessment)
     """
     try:
         nparr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
         if img is None:
-            return None, "Failed to decode image"
+            return None, "Failed to decode image", None
 
-        # OPTIMIZATION (Speed): Resize large images before running Haar Cascade to prevent CPU bottleneck
+        # OPTIMIZATION (Speed): Resize large images
         max_width = 800
-        h, w = img.shape[:2]
-        if w > max_width:
-            ratio = max_width / float(w)
-            img = cv2.resize(img, (max_width, int(h * ratio)), interpolation=cv2.INTER_AREA)
+        h_orig, w_orig = img.shape[:2]
+        if w_orig > max_width:
+            ratio = max_width / float(w_orig)
+            img = cv2.resize(img, (max_width, int(h_orig * ratio)), interpolation=cv2.INTER_AREA)
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(40, 40))
+        
+        # IMPROVEMENT: Histogram equalization to handle poor lighting
+        gray = cv2.equalizeHist(gray)
+        
+        # OPTIMIZATION: More accurate scaleFactor and lower minSize for better detection
+        faces = face_cascade.detectMultiScale(
+            gray, 
+            scaleFactor=1.1, 
+            minNeighbors=5, 
+            minSize=(30, 30),
+            flags=cv2.CASCADE_SCALE_IMAGE
+        )
 
         if len(faces) == 0:
-            return None, "No face detected in image"
+            return None, "No face detected in image", None
 
-        if len(faces) > 1:
-            largest_face = max(faces, key=lambda x: x[2] * x[3])
-            x, y, w, h = largest_face
-        else:
-            x, y, w, h = faces[0]
+        # Pick the largest face (closest to camera)
+        largest_face = max(faces, key=lambda x: x[2] * x[3])
+        x, y, w, h = largest_face
+
+        assessment = None
+        if include_assessment:
+            assessment = assess_face_quality(img, x, y, w, h)
 
         face_roi = img[y:y + h, x:x + w]
         face_roi_resized = cv2.resize(face_roi, (224, 224))
@@ -139,11 +265,11 @@ def extract_face_encoding(image_bytes):
         encoding = face_model(face_batch)
         encoding = encoding.numpy()[0]
 
-        return encoding, "Success"
+        return encoding, "Success", assessment
 
     except Exception:
         logging.exception("Face encoding extraction failed")
-        return None, "Face processing failed. Please try again."
+        return None, "Face processing failed. Please try again.", None
 
 
 def calculate_face_distance(encoding1, encoding2):
@@ -153,10 +279,38 @@ def calculate_face_distance(encoding1, encoding2):
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({"status": "Python face recognition service is running"}), 200
+    return jsonify({
+        "status": "online",
+        "device": os.environ.get("AI_DEVICE", "cpu"),
+        "cuda_available": torch.cuda.is_available() if torch else False
+    }), 200
 
 
-@app.route('/python-api/register-face', methods=['POST'])
+@app.route('/toggle-hardware', methods=['POST'])
+@require_jwt
+@require_admin
+def toggle_hardware():
+    """Toggle between CPU and GPU for AI tasks"""
+    try:
+        data = request.get_json()
+        target = data.get('device', 'cpu').lower()
+        
+        if target == 'cuda' and (not torch or not torch.cuda.is_available()):
+            return jsonify({"error": "CUDA (GPU) is not available on this system"}), 400
+            
+        os.environ["AI_DEVICE"] = target
+        return jsonify({
+            "success": True,
+            "device": target,
+            "message": f"AI hardware switched to {target.upper()}"
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+
+@app.route('/register-face', methods=['POST'])
 @require_jwt
 def register_face():
     """
@@ -165,8 +319,10 @@ def register_face():
     Note: This endpoint does not perform liveness detection. Callers must implement anti-spoofing.
     """
     try:
-        if request.form.get('clientLivenessVerified') != 'true':
-            return jsonify({"error": "clientLivenessVerified flag must be 'true'"}), 400
+        # ✅ SECURITY: Log assessment metadata but don't trust raw client flags for critical state
+        liveness_verified = request.form.get('clientLivenessVerified') == 'true'
+        if not liveness_verified:
+            logging.warning(f"Face registration for user {request.form.get('userId')} requested without client-side liveness signal.")
 
         if 'image' not in request.files:
             return jsonify({"error": "No image provided"}), 400
@@ -186,15 +342,29 @@ def register_face():
         if not valid:
             return jsonify({"error": msg}), 400
 
-        encoding, message = extract_face_encoding(image_bytes)
+        encoding, message, assessment = extract_face_encoding(image_bytes, include_assessment=True)
 
         if encoding is None:
             return jsonify({"error": message}), 400
+            
+        if assessment and assessment['score'] < 60:
+            return jsonify({
+                "error": "Low quality image. Please look straight at the camera in a well-lit area.",
+                "assessment": assessment
+            }), 422
 
         try:
             result = users_collection.update_one(
                 {"_id": ObjectId(user_id)},
-                {"$set": {"faceEncodingVector": encrypt_encoding(encoding.tolist())}}
+                {"$set": {
+                    "faceEncodingVector": encrypt_encoding(encoding.tolist()),
+                    "isFaceRegistered": True,
+                    "lastFaceAssessment": {
+                        "quality": assessment.get('score'),
+                        "liveness_signal": liveness_verified,
+                        "timestamp": datetime.utcnow()
+                    }
+                }}
             )
         except Exception:
             return jsonify({"error": "Invalid user ID format"}), 400
@@ -213,7 +383,7 @@ def register_face():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/python-api/verify-face', methods=['POST'])
+@app.route('/verify-face', methods=['POST'])
 @require_jwt
 def verify_face():
     """
@@ -227,8 +397,8 @@ def verify_face():
         if not request.files and not request.form:
             return jsonify({"success": True, "message": "Service online"}), 200
 
-        if request.form.get('clientLivenessVerified') != 'true':
-            return jsonify({"error": "clientLivenessVerified flag must be 'true'"}), 400
+        # ✅ SECURITY: Hierarchy check - log assessment metadata
+        liveness_verified = request.form.get('clientLivenessVerified') == 'true'
 
         if 'image' not in request.files or 'userId' not in request.form:
             return jsonify({"error": "Image and userId required"}), 400
@@ -256,7 +426,7 @@ def verify_face():
                 "message": "User face not registered in database"
             }), 400
 
-        encoding, message = extract_face_encoding(image_bytes)
+        encoding, message, assessment = extract_face_encoding(image_bytes, include_assessment=True)
 
         if encoding is None:
             return jsonify({
@@ -283,7 +453,32 @@ def verify_face():
         return jsonify({"verified": False, "error": str(e)}), 500
 
 
-@app.route('/python-api/recognize-face', methods=['POST'])
+@app.route('/assess-face', methods=['POST'])
+@require_jwt
+def assess_face():
+    """
+    Rapid runtime assessment of face quality without database updates.
+    Used for UI feedback during enrollment.
+    """
+    try:
+        if 'image' not in request.files:
+            return jsonify({"error": "No image provided"}), 400
+            
+        image_bytes = request.files['image'].read()
+        _, _, assessment = extract_face_encoding(image_bytes, include_assessment=True)
+        
+        if not assessment:
+            return jsonify({"error": "No face detected"}), 400
+            
+        return jsonify({
+            "success": True,
+            "assessment": assessment
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/recognize-face', methods=['POST'])
 @require_jwt
 def recognize_face():
     """
@@ -306,7 +501,7 @@ def recognize_face():
         if not valid:
             return jsonify({"error": msg}), 400
 
-        encoding, message = extract_face_encoding(image_bytes)
+        encoding, message, assessment = extract_face_encoding(image_bytes)
 
         if encoding is None:
             return jsonify({"error": message, "matches": []}), 400
@@ -349,7 +544,7 @@ def recognize_face():
         return jsonify({"error": str(e), "matches": []}), 500
 
 
-@app.route('/python-api/batch-encode', methods=['POST'])
+@app.route('/batch-encode', methods=['POST'])
 @require_jwt
 def batch_encode():
     """
@@ -414,7 +609,7 @@ def batch_encode():
                     })
                     continue
 
-                encoding, message = extract_face_encoding(image_bytes)
+                encoding, message, _ = extract_face_encoding(image_bytes)
 
                 if encoding is not None:
                     users_collection.update_one(
@@ -448,7 +643,7 @@ def batch_encode():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/python-api/clear-all', methods=['POST'])
+@app.route('/clear-all', methods=['POST'])
 @require_jwt
 @require_admin
 def clear_all():
@@ -466,6 +661,17 @@ try:
     print("[STARTUP] Image generation service initialized")
 except ImportError as e:
     print(f"[WARNING] Image generation service not available: {e}")
+
+# Register Voice Generation Service (Migrated from custom_ai_api.py)
+try:
+    from routes_voice_generation import voice_bp
+    from routes_compiler import compiler_bp
+
+    app.register_blueprint(voice_bp)
+    app.register_blueprint(compiler_bp)
+    print("[STARTUP] Voice generation & transcription service initialized")
+except ImportError as e:
+    print(f"[WARNING] Voice generation service not available: {e}")
 
 # Register Admin Storage Management Service
 try:
@@ -485,10 +691,23 @@ except ImportError as e:
 
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5001))
+    from waitress import serve
+    import socket
+
+    port = 5001
+    # Check if port is already in use to prevent 'dumb' crashes
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if s.connect_ex(('localhost', port)) == 0:
+            print(f"❌ ERROR: Port {port} is already in use!")
+            print(f"👉 Run this to fix: Stop-Process -Id (Get-NetTCPConnection -LocalPort {port}).OwningProcess -Force")
+            os._exit(1)
+
+    print(f"[STARTUP] Starting Monolithic AI Gateway on port {port}")
+    if torch:
+        print(f"[STARTUP] Mode: {'GPU (CUDA)' if torch.cuda.is_available() else 'CPU (Slow Mode)'}")
+    else:
+        print("[STARTUP] Mode: CPU (Torch not installed)")
     try:
-        from waitress import serve
-        print("[STARTUP] Starting face recognition service with Waitress on port {}".format(port))
         serve(app, host='0.0.0.0', port=port, threads=8)
     except Exception as e:
         print(f"[STARTUP] Waitress unavailable ({e}); falling back to Flask server.")

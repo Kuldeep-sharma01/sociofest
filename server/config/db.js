@@ -3,9 +3,9 @@ import mongoose from "mongoose";
 
 const connectDB = async () => {
   try {
-    const mongoUri = process.env.MONGODB_URI || process.env.MONGODB_URI;
+    const mongoUri = process.env.MONGODB_URI;
     if (!mongoUri) {
-      throw new Error("Missing MongoDB URI. Set MONGODB_URI (preferred) or MONGODB_URI.");
+      throw new Error("Missing MONGODB_URI environment variable. Set it in your .env or platform dashboard.");
     }
 
     const conn = await mongoose.connect(mongoUri);

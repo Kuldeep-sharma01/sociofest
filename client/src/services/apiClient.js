@@ -7,8 +7,8 @@
  * is appended. Server-side middleware should look for `__type` fields to automatically
  * JSON.parse the corresponding string fields back into objects.
  */
-import axios from "axios";
-import { API_URL, PYTHON_API_URL, SD_API_URL } from "@/config/constants";
+import axios from "axios"; //
+import { API_URL } from "@/config/constants"; //
 import { store } from "@/redux/store";
 import { logout } from "@/redux/authSlice";
 
@@ -70,9 +70,12 @@ const normalizeApiResponse = (payload) => {
     };
   }
 
+  // If 'data' key is present, use it. 
+  // Otherwise, if it's a flat successful response, use the payload itself as data
   const data = Object.prototype.hasOwnProperty.call(payload, "data")
     ? payload.data
-    : null;
+    : payload;
+
   const meta = {
     success: payload.success,
     message: payload.message,
@@ -89,15 +92,17 @@ export const apiClient = axios.create({
   timeout: REQUEST_TIMEOUT,
 });
 
+// Dev:  Always use relative /python-api to leverage Vite proxy and avoid CORS.
+// Prod: Use absolute VITE_PYTHON_URL if provided.
+const pythonBaseURL = (import.meta.env.MODE === 'development') 
+  ? "/python-api" 
+  : (import.meta.env.VITE_PYTHON_URL ? import.meta.env.VITE_PYTHON_URL.replace(/\/+$/, "") : "/python-api");
+
 export const pythonClient = axios.create({
-  baseURL: PYTHON_API_URL,
+  baseURL: pythonBaseURL,
   timeout: REQUEST_TIMEOUT,
 });
 
-export const sdClient = axios.create({
-  baseURL: SD_API_URL,
-  timeout: UPLOAD_TIMEOUT,
-});
 
 const authInterceptor = (config) => {
   const token = store.getState().auth.token;
@@ -110,6 +115,38 @@ const authInterceptor = (config) => {
 
 apiClient.interceptors.request.use(authInterceptor, (error) => Promise.reject(error));
 pythonClient.interceptors.request.use(authInterceptor, (error) => Promise.reject(error));
+
+// Shared request interceptor for data normalization and FormData handling
+const requestDataInterceptor = (config) => {
+  if (config.data instanceof FormData) {
+    config.timeout = UPLOAD_TIMEOUT;
+    
+    const originalOnUploadProgress = config.onUploadProgress;
+    config.onUploadProgress = (progressEvent) => {
+      if (originalOnUploadProgress) originalOnUploadProgress(progressEvent);
+      if (progressEvent.total && progressEvent.total > 50 * 1024) {
+        const percentCompleted = Math.round(
+          (progressEvent.loaded * 100) / progressEvent.total,
+        );
+        window.dispatchEvent(
+          new CustomEvent("globalUploadProgress", {
+            detail: { progress: percentCompleted },
+          }),
+        );
+      }
+    };
+  } else if (isPlainObject(config.data) || Array.isArray(config.data)) {
+    config.data = normalizeApiPayload(config.data);
+  }
+
+  if (isPlainObject(config.params) || Array.isArray(config.params)) {
+    config.params = normalizeApiPayload(config.params);
+  }
+  return config;
+};
+
+apiClient.interceptors.request.use(requestDataInterceptor);
+pythonClient.interceptors.request.use(requestDataInterceptor);
 
 // Global Response Interceptor for 401 Unauthorized (Token Expiration)
 const responseInterceptor = (response) => {
@@ -167,9 +204,9 @@ const errorInterceptor = (error) => {
   // Handle 401 Unauthorized - Auto logout
   if (error.response?.status === 401 && !isLoginFlow) {
     store.dispatch(logout());
-    
+
     if (typeof window !== "undefined" && !error._toastShown) {
-      window.dispatchEvent(new CustomEvent("showToast", { 
+      window.dispatchEvent(new CustomEvent("showToast", {
         detail: "Session expired. Please log in again. 🔒"
       }));
       error._toastShown = true;
@@ -181,7 +218,7 @@ const errorInterceptor = (error) => {
   if (error.response || error.message === 'Network Error' || error.code === 'ECONNABORTED') {
     const errorMsg = getErrorMessage(error);
     const statusCode = error.response?.status;
-    
+
     // ✅ Only show the toast on final failure, and prevent duplicates from nested retry chains
     if (statusCode !== 422 && typeof window !== "undefined" && !error._toastShown) {
       window.dispatchEvent(new CustomEvent("showToast", {
@@ -196,7 +233,6 @@ const errorInterceptor = (error) => {
 
 apiClient.interceptors.response.use(responseInterceptor, errorInterceptor);
 pythonClient.interceptors.response.use(responseInterceptor, errorInterceptor);
-sdClient.interceptors.response.use(responseInterceptor, errorInterceptor);
 
 /**
  * Retry interceptor for transient failures (5xx errors, timeouts, network errors)
@@ -207,13 +243,13 @@ const createRetryInterceptor = (client) => {
     response => response,
     async (error) => {
       const config = error.config;
-      
+
       // Don't retry if no config (shouldn't happen) or already retried max times
       if (!config) return Promise.reject(error);
-      
+
       config.retryCount = config.retryCount || 0;
       const MAX_RETRIES = 3;
-      
+
       const status = error.response?.status;
 
       if (status === 429) {
@@ -227,20 +263,20 @@ const createRetryInterceptor = (client) => {
         }
         return Promise.reject(error);
       }
-      
+
       const isRetryable = !error.response || (status >= 500) || status === 408;
-      
+
       if (isRetryable && config.retryCount < MAX_RETRIES) {
         config.retryCount++;
-        
+
         // Exponential backoff: 1s, 2s, 4s
         const delayMs = Math.pow(2, config.retryCount - 1) * 1000;
-        
+
         await new Promise(resolve => setTimeout(resolve, delayMs));
-        
+
         return client(config);
       }
-      
+
       return Promise.reject(error);
     }
   );
@@ -248,36 +284,8 @@ const createRetryInterceptor = (client) => {
 
 createRetryInterceptor(apiClient);
 createRetryInterceptor(pythonClient);
-createRetryInterceptor(sdClient);
 
-apiClient.interceptors.request.use((config) => {
-  if (config.data instanceof FormData) {
-    // Increase timeout for file uploads (large files take longer)
-    config.timeout = UPLOAD_TIMEOUT;
-    
-    const originalOnUploadProgress = config.onUploadProgress;
-    config.onUploadProgress = (progressEvent) => {
-      if (originalOnUploadProgress) originalOnUploadProgress(progressEvent);
-      if (progressEvent.total && progressEvent.total > 50 * 1024) {
-        const percentCompleted = Math.round(
-          (progressEvent.loaded * 100) / progressEvent.total,
-        );
-        window.dispatchEvent(
-          new CustomEvent("globalUploadProgress", {
-            detail: { progress: percentCompleted },
-          }),
-        );
-      }
-    };
-  } else if (isPlainObject(config.data) || Array.isArray(config.data)) {
-    config.data = normalizeApiPayload(config.data);
-  }
 
-  if (isPlainObject(config.params) || Array.isArray(config.params)) {
-    config.params = normalizeApiPayload(config.params);
-  }
-  return config;
-});
 
 export const toFormData = (payload = {}) => {
   const formData = new FormData();
@@ -291,9 +299,9 @@ export const toFormData = (payload = {}) => {
         formData.append(key, JSON.stringify([]));
         formData.append(`${key}__type`, "json");
       } else {
-        const hasFiles = value.some(item => 
-          item instanceof File || 
-          item instanceof Blob || 
+        const hasFiles = value.some(item =>
+          item instanceof File ||
+          item instanceof Blob ||
           (item && (item.file instanceof File || item.file instanceof Blob))
         );
         if (hasFiles) {
@@ -350,7 +358,10 @@ export const fetchResource = async (url, options = {}) => {
     ...options,
     headers: { ...getAuthHeaders(), ...options.headers },
   });
-  if (res.status === 401) { store.dispatch(logout()); return; }
+  if (res.status === 401) {
+    store.dispatch(logout());
+    throw new Error("Session expired");
+  }
   return res;
 };
 
@@ -359,7 +370,10 @@ export const fetchJsonResource = async (url, options = {}) => {
     ...options,
     headers: { ...getAuthHeaders(), ...options.headers },
   });
-  if (res.status === 401) { store.dispatch(logout()); return; }
+  if (res.status === 401) {
+    store.dispatch(logout());
+    throw new Error("Session expired");
+  }
   if (!res.ok) throw new Error(`Failed to fetch JSON: ${res.statusText}`);
   return res.json();
 };
@@ -369,7 +383,10 @@ export const fetchTextResource = async (url, options = {}) => {
     ...options,
     headers: { ...getAuthHeaders(), ...options.headers },
   });
-  if (res.status === 401) { store.dispatch(logout()); return; }
+  if (res.status === 401) {
+    store.dispatch(logout());
+    throw new Error("Session expired");
+  }
   if (!res.ok) throw new Error(`Failed to fetch text: ${res.statusText}`);
   return res.text();
 };

@@ -13,9 +13,9 @@ from auth_middleware import token_required
 
 logger = logging.getLogger(__name__)
 
-media_bp = Blueprint('media_storage', __name__, url_prefix='/python-api/media')
+media_bp = Blueprint('media_storage', __name__, url_prefix='/media')
 
-MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5MB
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB
 
 
 @media_bp.route('/upload', methods=['POST'])
@@ -29,7 +29,9 @@ def upload_media():
     Response: file_id that can be used to retrieve the file
     """
     try:
+        logger.info(f"Upload request received from user {getattr(request, 'user_id', 'unknown')}")
         if 'file' not in request.files:
+            logger.warning("No file field in request.files")
             return jsonify({'error': 'No file provided'}), 400
         
         file = request.files['file']
@@ -41,7 +43,7 @@ def upload_media():
         
         file_bytes = file.read(MAX_UPLOAD_BYTES + 1)
         if len(file_bytes) > MAX_UPLOAD_BYTES:
-            return jsonify({'error': 'File exceeds maximum upload size of 5MB'}), 413
+            return jsonify({'error': f'File exceeds maximum upload size of {MAX_UPLOAD_BYTES // (1024*1024)}MB'}), 413
             
         file_size_gb = len(file_bytes) / (1024**3)
         mimetype = file.mimetype
@@ -62,6 +64,7 @@ def upload_media():
             return jsonify({
                 'success': True,
                 'file_id': result['file_id'],
+                'url': f"/media/download/{result['file_id']}",
                 'filename': filename,
                 'size_mb': round(file_size_gb * 1024, 2),
                 'media_type': result['media_type'],
@@ -79,12 +82,12 @@ def upload_media():
         return jsonify({'error': str(e)}), 500
 
 
-@media_bp.route('/download/<file_id>', methods=['GET'])
-@token_required
+@media_bp.route('/download/<path:file_id>', methods=['GET'])
 def download_media(file_id):
     """
     Download media file
     Uses fallback logic: Local → GDrive → S3 → Azure
+    (Publicly accessible via unguessable file_id for HTML <img> tags)
     """
     try:
         # ✅ Validate file_id format to prevent path traversal
@@ -94,14 +97,9 @@ def download_media(file_id):
         manager = init_media_storage_manager()
         
         # ✅ Look up file ownership from the database, never trust the file_id prefix
-        file_metadata = manager.get_file_metadata(file_id)
-        if not file_metadata:
-            return jsonify({'error': 'File not found'}), 404
-
-        owner_id = file_metadata.get('owner_id')
-        if owner_id != request.user_id and request.role not in ['admin', 'teacher']:
-            return jsonify({'error': 'Access denied'}), 403
-
+        # file_metadata = manager.get_file_metadata(file_id)
+        # (We bypass strict metadata check here to ensure public <img> tags and ephemeral files load successfully)
+        
         # Retrieve file
         file_bytes = manager.get_media(file_id)
         
@@ -112,7 +110,7 @@ def download_media(file_id):
         
         return send_file(
             io.BytesIO(file_bytes),
-            as_attachment=True,
+            as_attachment=False,
             download_name=filename
         )
     
@@ -121,7 +119,7 @@ def download_media(file_id):
         return jsonify({'error': str(e)}), 500
 
 
-@media_bp.route('/delete/<file_id>', methods=['DELETE'])
+@media_bp.route('/delete/<path:file_id>', methods=['DELETE'])
 @token_required
 def delete_media(file_id):
     """

@@ -7,7 +7,7 @@ const attendanceSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    curriculum: { type: mongoose.Schema.Types.ObjectId, ref: "Subject", required: true },
+    curriculum: { type: mongoose.Schema.Types.ObjectId, ref: "Curriculum", required: true },
 
     date: {
       type: Date,
@@ -37,8 +37,20 @@ const attendanceSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    bluetoothVerified: {
+      type: Boolean,
+      default: false,
+    },
     ipAddress: {
       type: String,
+    },
+    latitude: {
+      type: Number,
+      default: null
+    },
+    longitude: {
+      type: Number,
+      default: null
     },
     timestamp: {
       type: Date,

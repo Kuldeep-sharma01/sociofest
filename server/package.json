@@ -22,9 +22,10 @@
     "express-rate-limit": "^8.3.1",
     "express-validator": "^7.2.1",
     "file-type": "^22.0.1",
-    "firebase-admin": "^13.7.0",
+    "firebase-admin": "^10.1.0",
     "get-stream": "^8.0.1",
     "helmet": "^8.1.0",
+    "http-proxy-middleware": "^3.0.5",
     "ioredis": "^5.10.1",
     "ipaddr.js": "^2.3.0",
     "jsdom": "^24.1.1",
@@ -32,12 +33,12 @@
     "mongoose": "^8.7.0",
     "morgan": "^1.10.0",
     "multer": "^2.0.2",
-    "node-cron": "^3.0.3",
+    "node-cron": "^4.2.1",
     "nodemailer": "^8.0.3",
     "pdfkit": "^0.15.1",
     "socket.io": "^4.8.3",
-    "vm2": "^3.10.5",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "winston": "^3.13.0"
   },
   "devDependencies": {
     "eslint": "^9.12.0",

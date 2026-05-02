@@ -40,7 +40,11 @@ const Subject = ({ Subjects }) => {
                     }`}
                   >
                     {showTeacher
-                      ? sub.assignedTeacher?.name || "Not Assigned"
+                      ? (Array.isArray(sub.assignedTeacher) 
+                          ? (sub.assignedTeacher.length > 0 
+                              ? sub.assignedTeacher.map(t => t.name || "Assigned").join(", ") 
+                              : "Not Assigned")
+                          : (sub.assignedTeacher?.name || "Not Assigned"))
                       : sub.semester
                         ? `Sem ${sub.semester}`
                         : "N/A"}

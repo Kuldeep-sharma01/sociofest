@@ -73,6 +73,8 @@ import {
   getPrimaryButtonClasses,
 } from "@/utils/themeUtils";
 import { parseLecturePost } from "@/utils/lectureUtils";
+import BiometricSettings from "@/components/settings/BiometricSettings";
+import VoiceSettings from "@/components/settings/VoiceSettings";
 
 const UserProfile = () => {
   const { userId: paramUserId } = useParams();
@@ -1338,6 +1340,12 @@ const UserProfile = () => {
                 >
                   Saved Lectures
                 </button>
+                <button
+                  onClick={() => setActivityTab("security")}
+                  className={`font-bold whitespace-nowrap px-2 pb-2 -mb-[10px] transition-colors ${activityTab === "security" ? "text-current border-b-2 border-current" : "opacity-60 hover:opacity-100 text-inherit"}`}
+                >
+                  Security & AI
+                </button>
               </>
             )}
             {currentUser?._id === profile._id && myTrashPosts.length > 0 && (
@@ -1498,6 +1506,15 @@ const UserProfile = () => {
                 </div>
               </div>
             ))}
+
+          {!loadingActivity &&
+            activityTab === "security" &&
+            currentUser?._id === profile._id && (
+              <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <BiometricSettings user={profile} />
+                <VoiceSettings user={profile} />
+              </div>
+            )}
         </div>
       </div>
       {fullscreenMedia && (

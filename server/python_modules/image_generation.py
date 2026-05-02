@@ -94,16 +94,11 @@ class StableDiffusionService:
     def __init__(self):
         self.pipeline = None
         self.current_model = None
-        self.device = "cpu"
+        # ✅ Respect the global AI_DEVICE toggle — do NOT override with auto-detect
+        self.device = os.getenv("AI_DEVICE", "cpu")
+        logger.info(f"StableDiffusion initialized using device: {self.device}")
         self.drive_manager = GoogleDriveModelManager()
         self.drive_manager.authenticate()
-        
-        # Use GPU if available
-        if torch.cuda.is_available():
-            self.device = "cuda"
-            logger.info("Using GPU for image generation")
-        else:
-            logger.info("Using CPU for image generation")
     
     def load_model(self, model_key='sd-1-5'):
         """Load model into memory"""

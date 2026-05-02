@@ -111,13 +111,13 @@ const EventDetailsModal = ({
 
           <div className="bg-black/5 dark:bg-white/5 p-4 rounded-lg border border-inherit/30 shadow-inner">
             <p className="text-inherit opacity-90 whitespace-pre-wrap text-sm">
-              {event.description || "No description provided."}
+              {(event.material?.description || event.description) || "No description provided."}
             </p>
           </div>
 
-          {event.media && event.media.length > 0 && (
+          {((event.material?.media || event.media) || []).length > 0 && (
             <div className="grid grid-cols-2 gap-3 mt-4">
-              {event.media.map((m, idx) => {
+              {(event.material?.media || event.media).map((m, idx) => {
                 const mPath = typeof m === "string" ? m : m.path;
                 const url = mPath?.startsWith("http") ? mPath : `/${mPath}`;
                 return (

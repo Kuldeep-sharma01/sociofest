@@ -34,27 +34,27 @@ const commentIdValidation = [param("commentId").isMongoId().withMessage("Invalid
  */
 
 /**
- * @route   GET /api/posts
+ * @route   GET /api/content
  * @desc    Get all posts (general feed)
  * @access  Private
  */
 router.get("/", protect, getAllContent);
 
 /**
- * @route   GET /api/posts/notices
+ * @route   GET /api/content/notices
  * @desc    Get notice board posts (Admin/HOD announcements)
  * @access  Private
  */
 router.get("/notices", protect, getNotices);
 /**
- * @route   GET /api/posts/user/:userId
+ * @route   GET /api/content/user/:userId
  * @desc    Get posts by a specific user
  * @access  Private
  */
 router.get("/user/:userId", protect, userIdValidation, validateRequest, getContentByUser);
 
 /**
- * @route   GET /api/posts/:id
+ * @route   GET /api/content/:id
  * @desc    Get a single post by ID
  * @access  Private
  */
@@ -65,7 +65,7 @@ router.get("/:id", protect, postIdValidation, validateRequest, getContentById);
  */
 
 /**
- * @route   POST /api/posts
+ * @route   POST /api/content
  * @desc    Create a new post
  * @access  Private (All roles can post)
  */
@@ -82,14 +82,14 @@ router.post(
 );
 
 /**
- * @route   POST /api/posts/:id/like
+ * @route   POST /api/content/:id/like
  * @desc    Like or unlike a post
  * @access  Private
  */
 router.post("/:id/like", protect, [...postIdValidation, body("type").optional().isString()], validateRequest, toggleLike);
 
 /**
- * @route   POST /api/posts/:id/comment
+ * @route   POST /api/content/:id/comment
  * @desc    Add a comment to a post
  * @access  Private
  */
@@ -100,7 +100,7 @@ router.post("/:id/comment", protect, [...postIdValidation, body("text").trim().n
  */
 
 /**
- * @route   PUT /api/posts/:id
+ * @route   PUT /api/content/:id
  * @desc    Update a post
  * @access  Private (Author only)
  */
@@ -118,7 +118,7 @@ router.put(
 );
 
 /**
- * @route   PUT /api/posts/:id/comment/:commentId
+ * @route   PUT /api/content/:id/comment/:commentId
  * @desc    Edit a comment on a post
  * @access  Private
  */
@@ -129,14 +129,14 @@ router.put("/:id/comment/:commentId", protect, [...postIdValidation, ...commentI
  */
 
 /**
- * @route   DELETE /api/posts/:id/comment/:commentId
+ * @route   DELETE /api/content/:id/comment/:commentId
  * @desc    Delete a comment from a post
  * @access  Private
  */
 router.delete("/:id/comment/:commentId", protect, [...postIdValidation, ...commentIdValidation], validateRequest, deleteComment);
 
 /**
- * @route   DELETE /api/posts/:id
+ * @route   DELETE /api/content/:id
  * @desc    Delete a post (Author, Admin, or HOD only)
  * @access  Private
  */

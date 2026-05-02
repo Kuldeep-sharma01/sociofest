@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-
+import { format } from "date-fns";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useSelector } from "react-redux";
 import {
@@ -18,7 +18,7 @@ import {
   CheckCircle,
   Eye,
   Link as LinkIcon,
-  Share,  
+  Share,
   AlertCircle,
   ClipboardList,
   Edit2,
@@ -357,7 +357,7 @@ export const SubjectPage = ({
         if (Array.isArray(response.subjects)) return response.subjects;
         return [];
       };
-      
+
       const rawPosts = Array.isArray(materialsRes?.content) ? materialsRes.content : Array.isArray(materialsRes) ? materialsRes : [];
       const parsedLectures = rawPosts
         .filter((p) => p.material?.description && p.material.description.startsWith("[LECTURE]"))
@@ -452,8 +452,8 @@ export const SubjectPage = ({
   const openEditSubject = async () => {
     const assignedIds = Array.isArray(subject?.assignedTeacher)
       ? subject.assignedTeacher
-          .map((t) => (typeof t === "object" && t !== null ? t._id : t))
-          .filter(Boolean)
+        .map((t) => (typeof t === "object" && t !== null ? t._id : t))
+        .filter(Boolean)
       : [];
 
     setEditSubData({
@@ -549,19 +549,15 @@ export const SubjectPage = ({
     if (!postToShare) return;
     try {
       const { sendMessage } = await import("@/services/chatService");
-      
+
       const rawContent = postToShare.material?.description || postToShare.content || "";
       const displayContent = rawContent.startsWith("[LECTURE]")
         ? rawContent.split("\n\n").slice(1).join("\n\n").trim() || "Shared a lecture"
         : rawContent.substring(0, 200) || "Shared a post";
 
+      const subjectName = postToShare.subjectLabel || "a subject";
       const payload = {
-        content: displayContent,
-        replyToMessage: {
-          _id: postToShare._id,
-          senderName: postToShare.author?.name || "A User",
-          content: displayContent.substring(0, 50) || "Forwarded Post",
-        }
+        content: `**Forwarded from ${subjectName}**\n\n${displayContent}`,
       };
 
       if (postToShare.mediaUrl || (postToShare.material?.media && postToShare.material.media.length > 0)) {
@@ -570,7 +566,7 @@ export const SubjectPage = ({
         payload.mediaTitles = [];
         payload.mediaDescriptions = [];
         payload.mediaDownloadable = [];
-        
+
         const mediaList = postToShare.material?.media || [];
         if (mediaList.length > 0) {
           mediaList.forEach((m) => {
@@ -579,21 +575,21 @@ export const SubjectPage = ({
             payload.mediaTypes.push(
               m.mimetype === "youtube" || /youtube\.com|youtu\.be/i.test(mPath)
                 ? "youtube"
-                : m.mimetype?.startsWith("video") ? "video" 
-                : m.mimetype?.startsWith("audio") ? "audio" 
-                : m.mimetype?.startsWith("image") ? "image"
-                : "document"
+                : m.mimetype?.startsWith("video") ? "video"
+                  : m.mimetype?.startsWith("audio") ? "audio"
+                    : m.mimetype?.startsWith("image") ? "image"
+                      : "document"
             );
             payload.mediaTitles.push(m.title || " ");
             payload.mediaDescriptions.push(m.description || " ");
             payload.mediaDownloadable.push(m.isDownloadable ?? false);
           });
         } else if (postToShare.mediaUrl) {
-           payload.mediaUrls.push(postToShare.mediaUrl);
-           payload.mediaTypes.push(postToShare.mediaType || "video");
-           payload.mediaTitles.push("Shared Media");
-           payload.mediaDescriptions.push(" ");
-           payload.mediaDownloadable.push(postToShare.isDownloadable ?? true);
+          payload.mediaUrls.push(postToShare.mediaUrl);
+          payload.mediaTypes.push(postToShare.mediaType || "video");
+          payload.mediaTitles.push("Shared Media");
+          payload.mediaDescriptions.push(" ");
+          payload.mediaDownloadable.push(postToShare.isDownloadable ?? true);
         }
       }
 
@@ -690,7 +686,7 @@ export const SubjectPage = ({
         }, extraPayload);
         window.dispatchEvent(new CustomEvent("showToast", { detail: "Updated successfully! 🚀" }));
       } else {
-                console.log("content str", contentStr, attachments, extraPayload);
+        console.log("content str", contentStr, attachments, extraPayload);
 
         await createContent(contentStr, attachments, (progressEvent) => {
           setUploadProgress(Math.round((progressEvent.loaded * 100) / progressEvent.total));
@@ -904,7 +900,7 @@ export const SubjectPage = ({
   const handleEditAssignmentStart = (assignment) => {
     setEditingAssignmentId(assignment._id);
     const d = assignment.dueDate ? new Date(assignment.dueDate) : null;
-    const formattedDate = d ? new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
+    const formattedDate = d ? format(d, "yyyy-MM-dd'T'HH:mm") : "";
     setEditAssignmentData({
       title: assignment.title,
       description: assignment.material?.description || "",
@@ -913,15 +909,15 @@ export const SubjectPage = ({
     setEditAssignmentFiles(
       assignment.material?.media
         ? assignment.material.media.map((m) => {
-            const mPath = typeof m === "string" ? m : m.path;
-            return {
-              _id: typeof m === "string" ? m : m._id,
-              name: m.title || "Attached File",
-              url: mPath?.startsWith("http") ? mPath : `/${mPath}`,
-              mimetype: m.mimetype,
-              isRetained: true,
-            };
-          })
+          const mPath = typeof m === "string" ? m : m.path;
+          return {
+            _id: typeof m === "string" ? m : m._id,
+            name: m.title || "Attached File",
+            url: mPath?.startsWith("http") ? mPath : `/${mPath}`,
+            mimetype: m.mimetype,
+            isRetained: true,
+          };
+        })
         : [],
     );
   };
@@ -978,7 +974,7 @@ export const SubjectPage = ({
     try {
       const formData = new FormData();
       if (inputData.text) formData.append("textAnswer", inputData.text);
-      
+
       const retainedIds = inputData.files?.filter(f => f.isRetained).map(f => f._id) || [];
       if (retainedIds.length === 0) {
         formData.append("retainedMediaIds", "[]");
@@ -1065,7 +1061,7 @@ export const SubjectPage = ({
     const isCrossOrigin =
       new URL(fileUrl, window.location.href).origin !== window.location.origin;
     let objectUrl = null;
-    
+
     try {
       window.dispatchEvent(
         new CustomEvent("showToast", { detail: "Preparing download... ⏳" }),
@@ -1306,7 +1302,7 @@ export const SubjectPage = ({
                   <p className="text-sm opacity-70 mt-2 flex justify-center gap-1 flex-wrap">
                     <span className="font-semibold">Teacher:</span>{" "}
                     {Array.isArray(sub.assignedTeacher) &&
-                    sub.assignedTeacher.length > 0
+                      sub.assignedTeacher.length > 0
                       ? sub.assignedTeacher.map((t) => t?.name || (typeof t === "string" ? t : "Unknown")).join(", ")
                       : sub.assignedTeacher?.name || " Not Assigned"}
                   </p>
@@ -1355,22 +1351,22 @@ export const SubjectPage = ({
   const canManageContent =
     user?.role === "Admin" || user?.role === "HOD" || isAssignedTeacher;
 
-  const studentGradedSubmissions = user?.role === "Student" 
+  const studentGradedSubmissions = user?.role === "Student"
     ? assignments.reduce((acc, a) => {
-        const mySub = a.mySubmission || a.submissions?.find(s => String(s.student?._id || s.student) === String(user._id));
-        if (mySub && typeof mySub.grade === 'number') acc.push(mySub.grade);
-        return acc;
-      }, [])
+      const mySub = a.mySubmission || a.submissions?.find(s => String(s.student?._id || s.student) === String(user._id));
+      if (mySub && typeof mySub.grade === 'number') acc.push(mySub.grade);
+      return acc;
+    }, [])
     : [];
-  const studentAvgGrade = studentGradedSubmissions.length > 0 
-    ? (studentGradedSubmissions.reduce((sum, g) => sum + g, 0) / studentGradedSubmissions.length).toFixed(1) 
+  const studentAvgGrade = studentGradedSubmissions.length > 0
+    ? (studentGradedSubmissions.reduce((sum, g) => sum + g, 0) / studentGradedSubmissions.length).toFixed(1)
     : null;
 
   return (
-    <div
-      className={`w-full ${embedded ? "" : "max-w-5xl mx-auto m-5"} space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500`}
-    >
-<ErrorAlert message={error} className="mb-6" />
+    <div className="w-full h-full bg-transparent">
+      <div className="min-h-full w-full">
+        <div className={`flex flex-col ${embedded ? "" : "max-w-5xl mx-auto pt-6 pb-20 px-4 sm:px-6"} space-y-8`}>
+      <ErrorAlert message={error} className="mb-6" />
 
       {viewerFile && (
         <div className="fixed inset-0 z-[9999]">
@@ -1392,7 +1388,7 @@ export const SubjectPage = ({
         <ArrowLeft className="w-4 h-4" /> Back to Hub
       </button>
 
-     {/* Subject header */}
+      {/* Subject header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center  border-b pb-4 gap-4 border-gray-100 dark:border-gray-700">
         <div className="w-full">
           {isEditingSubject ? (
@@ -1423,18 +1419,18 @@ export const SubjectPage = ({
               <p className="opacity-80 text-inherit mt-2 flex gap-1 items-center flex-wrap">
                 Instructor(s):{" "}
                 {Array.isArray(subject.assignedTeacher) &&
-                subject.assignedTeacher.length > 0
+                  subject.assignedTeacher.length > 0
                   ? subject.assignedTeacher.map((t, idx) => (
-                      <span key={t?._id || t || idx}>
-                        <Link
-                          to={`/profile/${t?._id || t}`}
-                          className="text-current opacity-90 hover:opacity-100 transition-colors hover:no-underline font-medium"
-                        >
-                          {t?.name || "Unknown Teacher"}
-                        </Link>
-                        {idx < subject.assignedTeacher.length - 1 && ", "}
-                      </span>
-                    ))
+                    <span key={t?._id || t || idx}>
+                      <Link
+                        to={`/profile/${t?._id || t}`}
+                        className="text-current opacity-90 hover:opacity-100 transition-colors hover:no-underline font-medium"
+                      >
+                        {t?.name || "Unknown Teacher"}
+                      </Link>
+                      {idx < subject.assignedTeacher.length - 1 && ", "}
+                    </span>
+                  ))
                   : "Not Assigned"}
               </p>
             </>
@@ -1479,20 +1475,20 @@ export const SubjectPage = ({
             <div className="flex flex-col gap-3">
               <input
                 type="text"
-              placeholder="Title / Topic Name *"
-              value={uploadData.title}
+                placeholder="Title / Topic Name *"
+                value={uploadData.title}
                 onChange={(e) =>
-                setUploadData({ ...uploadData, title: e.target.value })
+                  setUploadData({ ...uploadData, title: e.target.value })
                 }
                 className="w-full border border-inherit/30 p-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-current bg-black/5 dark:bg-white/5 text-inherit"
               />
-              
+
               {/* External Links Section */}
               <div className="bg-black/5 dark:bg-white/5 p-4 rounded-xl border border-inherit/10 flex flex-col gap-4 mt-2">
                 <h4 className="text-xs font-bold uppercase tracking-wider opacity-60 flex items-center gap-2">
-                  <LinkIcon className="w-3.5 h-3.5"/> External Links (Optional)
+                  <LinkIcon className="w-3.5 h-3.5" /> External Links (Optional)
                 </h4>
-                
+
                 <div>
                   <label htmlFor="upload-media" className="block text-sm font-bold text-inherit opacity-90 mb-1">
                     Main Video / Document Link
@@ -1510,66 +1506,66 @@ export const SubjectPage = ({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label htmlFor="upload-english" className="block text-sm font-bold text-inherit opacity-90 mb-1">
-                        English Notes Link
+                      English Notes Link
                     </label>
                     <input
-                        id="upload-english"
-                        type="url"
+                      id="upload-english"
+                      type="url"
                       value={uploadData.englishAttachmentUrl}
                       onChange={(e) => setUploadData({ ...uploadData, englishAttachmentUrl: e.target.value })}
                       placeholder="e.g. Drive link for English notes"
-                        className="w-full border border-inherit/30 bg-white dark:bg-black/20 text-inherit p-2.5 rounded-lg focus:ring-2 focus:ring-current outline-none transition-colors shadow-inner"
+                      className="w-full border border-inherit/30 bg-white dark:bg-black/20 text-inherit p-2.5 rounded-lg focus:ring-2 focus:ring-current outline-none transition-colors shadow-inner"
                     />
                   </div>
                   <div>
                     <label htmlFor="upload-hindi" className="block text-sm font-bold text-inherit opacity-90 mb-1">
-                        Hindi Notes Link
+                      Hindi Notes Link
                     </label>
                     <input
-                        id="upload-hindi"
-                        type="url"
+                      id="upload-hindi"
+                      type="url"
                       value={uploadData.hindiAttachmentUrl}
                       onChange={(e) => setUploadData({ ...uploadData, hindiAttachmentUrl: e.target.value })}
                       placeholder="e.g. Drive link for Hindi notes"
-                        className="w-full border border-inherit/30 bg-white dark:bg-black/20 text-inherit p-2.5 rounded-lg focus:ring-2 focus:ring-current outline-none transition-colors shadow-inner"
+                      className="w-full border border-inherit/30 bg-white dark:bg-black/20 text-inherit p-2.5 rounded-lg focus:ring-2 focus:ring-current outline-none transition-colors shadow-inner"
                     />
                   </div>
                 </div>
               </div>
 
-            <PostComposer
-              value={composerText}
-              onChange={setComposerText}
-              onSend={handlePublishMaterial}
-              isSending={isPublishing}
-              placeholder="Add description or paste link..."
-              user={user}
-              attachments={attachments}
-              onAddFiles={(incoming) => {
-                let atts = incoming;
-                if (incoming.target) {
-                  atts = Array.from(incoming.target.files).map((f) => ({
-                    file: f, previewUrl: URL.createObjectURL(f), type: f.type.startsWith("video") ? "video" : f.type.startsWith("image") ? "image" : "document", title: f.name, description: "", isDownloadable: uploadData.isDownloadable
-                  }));
-                  incoming.target.value = null;
-                }
-                setAttachments((prev) => [...prev, ...atts]);
-              }}
-              onRemoveFile={(idx) => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
-              isDownloadable={uploadData.isDownloadable}
-              onIsDownloadableChange={(e) => { const chk = e.target.checked; setUploadData({ ...uploadData, isDownloadable: chk }); setAttachments(prev => prev.map(a => ({...a, isDownloadable: chk}))); }}
-              setFullscreenMedia={setViewerFile}
-              hideInternalPreview={false}
+              <PostComposer
+                value={composerText}
+                onChange={setComposerText}
+                onSend={handlePublishMaterial}
+                isSending={isPublishing}
+                placeholder="Add description or paste link..."
+                user={user}
+                attachments={attachments}
+                onAddFiles={(incoming) => {
+                  let atts = incoming;
+                  if (incoming.target) {
+                    atts = Array.from(incoming.target.files).map((f) => ({
+                      file: f, previewUrl: URL.createObjectURL(f), type: f.type.startsWith("video") ? "video" : f.type.startsWith("image") ? "image" : "document", title: f.name, description: "", isDownloadable: uploadData.isDownloadable
+                    }));
+                    incoming.target.value = null;
+                  }
+                  setAttachments((prev) => [...prev, ...atts]);
+                }}
+                onRemoveFile={(idx) => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
+                isDownloadable={uploadData.isDownloadable}
+                onIsDownloadableChange={(e) => { const chk = e.target.checked; setUploadData({ ...uploadData, isDownloadable: chk }); setAttachments(prev => prev.map(a => ({ ...a, isDownloadable: chk }))); }}
+                setFullscreenMedia={setViewerFile}
+                hideInternalPreview={false}
               />
-            {uploadProgress > 0 && uploadProgress < 100 && <UploadProgress progress={uploadProgress} fileName="Uploading..." />}
+              {uploadProgress > 0 && uploadProgress < 100 && <UploadProgress progress={uploadProgress} fileName="Uploading..." />}
             </div>
             <div className="flex justify-end mt-3">
               <button
-              onClick={handlePublishMaterial}
-              disabled={isPublishing}
+                onClick={handlePublishMaterial}
+                disabled={isPublishing}
                 className={`flex items-center px-4 py-2 font-bold rounded-lg disabled:opacity-50 transition-colors shadow-sm ${getPrimaryButtonClasses(appTheme)}`}
               >
-              {isPublishing ? (
+                {isPublishing ? (
                   <>
                     <div
                       className="loader mr-2"
@@ -1596,21 +1592,21 @@ export const SubjectPage = ({
               className="my-4"
             />
           ) : (
-          <div className="columns-1 md:columns-2 gap-4 w-full">
-            {materials.map((m, idx) => (
-              <PostCard
-                key={m._id || idx}
-                post={m}
-                currentUser={user}
-                onLike={handleLike}
-                onBookmark={handleBookmark}
-                onDelete={canManageContent ? handleDeleteMaterial : undefined}
-                onComment={handleComment}
-                onShare={handleShareClick}
-                setFullscreenMedia={setViewerFile}
-              />
-            ))}
-          </div>
+            <div className="columns-1 md:columns-2 gap-4 w-full">
+              {materials.map((m, idx) => (
+                <PostCard
+                  key={m._id || idx}
+                  post={m}
+                  currentUser={user}
+                  onLike={handleLike}
+                  onBookmark={handleBookmark}
+                  onDelete={canManageContent ? handleDeleteMaterial : undefined}
+                  onComment={handleComment}
+                  onShare={handleShareClick}
+                  setFullscreenMedia={setViewerFile}
+                />
+              ))}
+            </div>
           )}
         </div>
       </section>
@@ -1722,7 +1718,7 @@ export const SubjectPage = ({
               className="my-4"
             />
           ) : (
-              assignments.map((a, idx) => {
+            assignments.map((a, idx) => {
               // console.log("Rendering assignment",a);
               const hasSubmitted = !!a.mySubmission || a.submissions?.some(
                 (sub) =>
@@ -1975,30 +1971,30 @@ export const SubjectPage = ({
                                 )}
                               {(mySubmission.grade === null ||
                                 mySubmission.grade === undefined) && (
-                                <button
-                                  onClick={() => {
-                                    setResubmittingAssignment(a._id);
-                                    setSubmissionInputs((prev) => ({
-                                      ...prev,
-                                      [a._id]: {
-                                        text: mySubmission.textAnswer || "",
-                                        files: mySubmission.media
-                                          ? mySubmission.media.map(m => ({
+                                  <button
+                                    onClick={() => {
+                                      setResubmittingAssignment(a._id);
+                                      setSubmissionInputs((prev) => ({
+                                        ...prev,
+                                        [a._id]: {
+                                          text: mySubmission.textAnswer || "",
+                                          files: mySubmission.media
+                                            ? mySubmission.media.map(m => ({
                                               _id: typeof m === "string" ? m : m._id,
                                               name: m.title || "Attached File",
                                               previewUrl: m.path?.startsWith("http") ? m.path : `/${m.path}`,
                                               isRetained: true,
                                             }))
-                                          : [],
-                                      },
-                                    }));
-                                  }}
-                                  className="mt-3 inline-flex w-fit items-center gap-1.5 text-sm font-bold bg-yellow-500/10 text-yellow-700 dark:text-yellow-300 border border-yellow-500/30 px-3 py-1.5 rounded-lg hover:bg-yellow-500/20 transition-colors shadow-sm"
-                                >
-                                  <Edit2 className="w-4 h-4" /> Resubmit
-                                  Assignment
-                                </button>
-                              )}
+                                            : [],
+                                        },
+                                      }));
+                                    }}
+                                    className="mt-3 inline-flex w-fit items-center gap-1.5 text-sm font-bold bg-yellow-500/10 text-yellow-700 dark:text-yellow-300 border border-yellow-500/30 px-3 py-1.5 rounded-lg hover:bg-yellow-500/20 transition-colors shadow-sm"
+                                  >
+                                    <Edit2 className="w-4 h-4" /> Resubmit
+                                    Assignment
+                                  </button>
+                                )}
                             </div>
                           ) : (
                             <div className="flex flex-col gap-3 bg-black/5 dark:bg-white/5 p-4 rounded-xl border border-inherit/30 shadow-inner text-inherit">
@@ -2080,87 +2076,87 @@ export const SubjectPage = ({
                       {(user?.role === "Teacher" ||
                         user?.role === "HOD" ||
                         user?.role === "Admin") && (
-                        <div>
-                          <h4 className="font-bold text-inherit mb-3 flex items-center gap-2">
-                            <Users className="w-5 h-5 text-current opacity-80" />{" "}
-                            Student Submissions (
-                            <span className="text-inherit opacity-90 font-bold">
-                              {a.submissions?.length || 0}
-                            </span>
-                            )
-                          </h4>
-                          {a.submissions?.length > 0 ? (
-                            <div className="flex flex-col gap-3 max-h-[60vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded-full pr-2">
-                              {a.submissions.slice(0, 100).map((sub, sIdx) => {
-                                const studentObj =
-                                  typeof sub.student === "object"
-                                    ? sub.student
-                                    : enrolledUsers.find(
+                          <div>
+                            <h4 className="font-bold text-inherit mb-3 flex items-center gap-2">
+                              <Users className="w-5 h-5 text-current opacity-80" />{" "}
+                              Student Submissions (
+                              <span className="text-inherit opacity-90 font-bold">
+                                {a.submissions?.length || 0}
+                              </span>
+                              )
+                            </h4>
+                            {a.submissions?.length > 0 ? (
+                              <div className="flex flex-col gap-3 max-h-[60vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded-full pr-2">
+                                {a.submissions.slice(0, 100).map((sub, sIdx) => {
+                                  const studentObj =
+                                    typeof sub.student === "object"
+                                      ? sub.student
+                                      : enrolledUsers.find(
                                         (u) =>
                                           String(u._id) === String(sub.student),
                                       );
-                                return (
-                                  <SubmissionItem
-                                    key={sIdx}
-                                    submission={sub}
-                                    studentName={
-                                      studentObj?.name || "Unknown Student"
-                                    }
-                                    studentAvatar={studentObj?.profilePicture}
-                                    onViewMedia={(url, title) =>
-                                      setViewerFile({ url, title })
-                                    }
-                                    gradingState={
-                                      gradingState[
+                                  return (
+                                    <SubmissionItem
+                                      key={sIdx}
+                                      submission={sub}
+                                      studentName={
+                                        studentObj?.name || "Unknown Student"
+                                      }
+                                      studentAvatar={studentObj?.profilePicture}
+                                      onViewMedia={(url, title) =>
+                                        setViewerFile({ url, title })
+                                      }
+                                      gradingState={
+                                        gradingState[
                                         `${a._id}-${studentObj?._id}`
-                                      ]
-                                    }
-                                    onEditGrade={() =>
-                                      setGradingState((prev) => ({
-                                        ...prev,
-                                        [`${a._id}-${studentObj?._id}`]: {
-                                          grade: sub.grade || "",
-                                          feedback: sub.feedback || "",
-                                          editing: true,
-                                        },
-                                      }))
-                                    }
-                                    onSaveGrade={() =>
-                                      handleGradeSubmit(a._id, studentObj?._id)
-                                    }
-                                    onGradeChange={(val) =>
-                                      setGradingState((prev) => ({
-                                        ...prev,
-                                        [`${a._id}-${studentObj?._id}`]: {
-                                          ...prev[
+                                        ]
+                                      }
+                                      onEditGrade={() =>
+                                        setGradingState((prev) => ({
+                                          ...prev,
+                                          [`${a._id}-${studentObj?._id}`]: {
+                                            grade: sub.grade || "",
+                                            feedback: sub.feedback || "",
+                                            editing: true,
+                                          },
+                                        }))
+                                      }
+                                      onSaveGrade={() =>
+                                        handleGradeSubmit(a._id, studentObj?._id)
+                                      }
+                                      onGradeChange={(val) =>
+                                        setGradingState((prev) => ({
+                                          ...prev,
+                                          [`${a._id}-${studentObj?._id}`]: {
+                                            ...prev[
                                             `${a._id}-${studentObj?._id}`
-                                          ],
-                                          grade: val,
-                                        },
-                                      }))
-                                    }
-                                    onFeedbackChange={(val) =>
-                                      setGradingState((prev) => ({
-                                        ...prev,
-                                        [`${a._id}-${studentObj?._id}`]: {
-                                          ...prev[
+                                            ],
+                                            grade: val,
+                                          },
+                                        }))
+                                      }
+                                      onFeedbackChange={(val) =>
+                                        setGradingState((prev) => ({
+                                          ...prev,
+                                          [`${a._id}-${studentObj?._id}`]: {
+                                            ...prev[
                                             `${a._id}-${studentObj?._id}`
-                                          ],
-                                          feedback: val,
-                                        },
-                                      }))
-                                    }
-                                  />
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <p className="text-sm opacity-70 text-inherit italic">
-                              No submissions yet.
-                            </p>
-                          )}
-                        </div>
-                      )}
+                                            ],
+                                            feedback: val,
+                                          },
+                                        }))
+                                      }
+                                    />
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <p className="text-sm opacity-70 text-inherit italic">
+                                No submissions yet.
+                              </p>
+                            )}
+                          </div>
+                        )}
                     </AssignmentCard>
                   )}
                 </React.Fragment>
@@ -2183,7 +2179,7 @@ export const SubjectPage = ({
           </h3>
           <div className="flex flex-wrap gap-4 mb-6">
             {Array.isArray(subject.assignedTeacher) &&
-            subject.assignedTeacher.length > 0 ? (
+              subject.assignedTeacher.length > 0 ? (
               <>
                 {subject.assignedTeacher.filter(Boolean).slice(0, 50).map((t, idx) => (
                   <UserCard
@@ -2212,7 +2208,7 @@ export const SubjectPage = ({
             const subjDeptId = subject?.department?._id || subject?.department;
             const students = enrolledUsers.filter((u) => {
               const uDeptId = u.department?._id || u.department;
-              
+
               const explicitlyEnrolled = u.subjects?.some(
                 (s) => String(s._id || s) === String(subject?._id)
               );
@@ -2267,6 +2263,8 @@ export const SubjectPage = ({
         onShare={handleSendShare}
       />
     </div>
+  </div>
+</div>
   );
 };
 

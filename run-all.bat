@@ -149,7 +149,8 @@ echo 🚀 SocioFest FULL STACK LIVE! (Minimized terminals)
 echo 📱 Frontend: http://localhost:5173
 echo 🖥️ Backend: http://localhost:5000
 echo ️ Voice AI: http://localhost:8000
-echo 😎 Face AI: http://localhost:5001
+echo 😎 Face AI (via Gateway): http://localhost:5000/api/face-rec
+echo 💻 Compiler (via Gateway): http://localhost:5000/api/compiler-test
 echo 🎨 Images: http://localhost:7860  
 echo 🗄️ Mongo: localhost:27017
 echo.

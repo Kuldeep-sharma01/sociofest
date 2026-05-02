@@ -72,7 +72,7 @@ const SmartChaptersMenu = ({ onClose, videoRef, duration }) => {
   };
 
   return (
-    <div className={`fixed sm:absolute top-1/2 sm:top-20 left-1/2 sm:left-4 -translate-x-1/2 sm:translate-x-0 -translate-y-1/2 sm:translate-y-0 backdrop-blur-xl p-4 rounded-2xl shadow-2xl z-[100] w-[90vw] sm:w-72 max-h-[85vh] overflow-y-auto animate-in fade-in zoom-in-95 sm:slide-in-from-left-4 border ${getPanelTheme(appTheme)}`}>
+    <div className={`fixed sm:absolute top-1/2 sm:top-20 left-1/2 sm:left-4 -translate-x-1/2 sm:translate-x-0 -translate-y-1/2 sm:translate-y-0 backdrop-blur-xl p-4 rounded-2xl shadow-2xl z-[20000] w-[90vw] sm:w-72 max-h-[85vh] overflow-y-auto animate-in fade-in zoom-in-95 sm:slide-in-from-left-4 border ${getPanelTheme(appTheme)}`}>
       <div className="flex justify-between items-center mb-4 border-b border-inherit/20 pb-2">
         <h3 className="font-bold text-sm text-inherit flex items-center gap-2"><ListOrdered className="w-4 h-4"/> Smart Chapters</h3>
         <button onClick={onClose} className="opacity-50 hover:opacity-100"><X className="w-4 h-4"/></button>

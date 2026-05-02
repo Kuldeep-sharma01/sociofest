@@ -1,157 +1,138 @@
-# 🚀 SocioFest Complete Deployment Guide
-## From Scratch Setup (Local/Cloud - Docker or Native)
+# 🚀 SocioFest Deployment Guide
+## Unified Multi-Cloud Microservices (Client + Server + Monolithic Python AI)
 
-### 📋 Prerequisites
-```
-Node.js 20+ (https://nodejs.org)
-Python 3.10+ (https://python.org - "Add to PATH" checked)
-MongoDB (Local or Atlas)
-Git
-FFmpeg (optional for media)
-```
-*Cloud*: VPS (Ubuntu 22.04+), domain name, SSL certs
+SocioFest is now powered by a **Monolithic Python AI Gateway**. Face Recognition, Image Generation, Voice Cloning, and Transcription are all unified into a single service running on Port 5001.
 
 ---
 
-## 1. Clone & Initial Setup
-```bash
-git clone <repo>
-cd sociofest
-npm install
-npm --prefix client install
-npm --prefix server install
+## 🏗️ Architecture Overview
+
+```
+┌─────────────┐     ┌──────────────────┐     ┌───────────────────────┐
+│   Client     │────▶│  Server (Node)   │────▶│  Python AI Gateway    │
+│  Vite/React  │     │  Express API     │     │  (Port 5001)          │
+│  Port 5173   │     │  Port 5000       │     │  ───────────────────  │
+│  (Vercel)    │     │  (Render)        │     │  • Face Recognition   │
+└─────────────┘     └──────────────────┘     │  • Stable Diffusion   │
+                             │               │  • Voice Cloning      │
+                      ┌──────┴──────┐        │  • Transcription      │
+                      │  MongoDB    │        └───────────────────────┘
+                      │  (Atlas)    │                   ▲
+                      └─────────────┘                   │
+                             │                          │
+                             └──────────────────────────┘
 ```
 
-## 2. Environment Files (.env Creation)
-Copy templates & edit:
+### 🧠 Generative AI Modality Breakdown
 
-**server/.env**
-```
-NODE_ENV=production
-PORT=5000
-MONGODB_URI=mongodb://localhost:27017/sociofest # or Atlas
-JWT_SECRET=your-super-secret-jwt-key-64chars-min
-PYTHON_API_URL=http://localhost:5001
-VOICE_AI_URL=http://localhost:8000
-VITE_CLIENT_URL=http://localhost:5173,http://yourdomain.com
-UPLOAD_LIMIT_MB=50
-```
-
-**client/.env**
-```
-VITE_CLIENT_URL=http://localhost:5000/api
-PYTHON_API_URL=http://localhost:5001
-VITE_VOICE_API_URL=http://localhost:8000
-```
-
-**server/python_modules/.env**
-```
-MONGODB_URI=your-mongo-uri
-OPENAI_API_KEY=sk-...
-HUGGINGFACE_TOKEN=hf_...
-```
+| AI Type | Engine | Service | Backend Handler |
+|---------|--------|---------|-----------------|
+| **Text** | Google Gemini | Node.js (5000) | `aiController.js` |
+| **Image** | Stable Diffusion | Python (5001) | `routes_image_generation.py` |
+| **Voice** | Coqui XTTSv2 | Python (5001) | `routes_voice_generation.py` |
+| **STT** | OpenAI Whisper | Python (5001) | `routes_voice_generation.py` |
+| **Face** | TensorFlow | Python (5001) | `app.py` |
+| **Compiler** | Subprocess | Python (5001) | `routes_compiler.py` |
 
 ---
 
-## 3. Deployment Modes
+## 🛠️ 1. Environment Configuration
 
-### A. Native Local (No Docker - Windows/Mac/Linux)
+### Shared Secrets (MUST Match)
+| Variable | Purpose |
+|----------|---------|
+| `JWT_SECRET` | Used by Node & Python to verify user identity. |
+| `MONGODB_URI` | Both services must connect to the same DB. |
+| `FRONTEND_URL` | Essential for CORS whitelist (e.g., `https://sociofest.vercel.app`). |
+
+### AI-Specific Keys
+| Variable | Service | Purpose |
+|----------|---------|---------|
+| `GEMINI_API_KEY` | Node | Powers the AI Tutor and Chatbot. |
+| `FACE_ENCRYPTION_KEY` | Python | Encrypts facial biometric data in the DB. |
+| `SD_MODEL_PATH` | Python | (Optional) Path to local Stable Diffusion checkpoints. |
+
+---
+
+## 🧬 2. AI Model Management (Linking & Uploading)
+
+The Python service manages its models via the `server/python_modules/model_cache` directory.
+
+### 🖼️ Image Generation (Stable Diffusion)
+- **Automatic:** On the first request, the server will download `runwayml/stable-diffusion-v1-5` from HuggingFace to the `model_cache`.
+- **Manual (WebUI Style):** You can place custom `.safetensors` or `.ckpt` files in `server/python_modules/stable_diffusion_models/` and update `image_config.json` to link them.
+- **Optimization:** The gateway uses a **1-worker ThreadPool**. This prevents GPU VRAM crashes by processing image requests one at a time.
+- **⚠️ CRITICAL (Production):** AI models (XTTS, SD, Whisper) are huge (1GB - 4GB). If deploying to Render/Railway, you **MUST** attach a **Persistent Volume** to `/server/python_modules/model_cache`. Without this, your server will re-download models on every restart, causing a 5-10 minute "Cold Start" delay.
+
+### 🎙️ Voice AI (TTS & STT)
+- **Models:** Uses `xtts_v2` for voice cloning and `whisper-base` for transcription.
+- **Linking:** Models are stored in `~/.cache/tts` and `~/.cache/whisper` by default. 
+- **Voice Cloning:** Requires a 5-10 second sample `.wav` file of the target voice.
+- **FFmpeg:** Ensure FFmpeg is installed on your server path for audio stretching and VTT processing.
+
+### 🔍 Face Recognition
+- Uses `MobileNetV2` feature vectors. Biometric encodings are encrypted with `Fernet` (AES-128) before being saved to MongoDB.
+- **Security Policy:** All requests (`register-face`, `verify-face`) **MUST** include the `clientLivenessVerified: true` flag. The backend will reject any request without it to prevent static image injection.
+
+### 💻 Python Compiler
+- **Sandbox:** Python code is executed in a temporary subprocess with a **5.0s timeout**.
+- **Isolation:** Files are written to a temporary directory and deleted immediately after execution.
+
+---
+
+## 🚀 3. Deployment Steps
+
+### Step A: Deploy Python AI (Render/Railway/VPS)
+**Root Directory:** `server/python_modules`  
+**Port:** 5001
+1. Install dependencies: `pip install -r requirements.txt`
+2. Start Command: `python app.py`
+3. Set `PYTHON_BACKEND_PORT=5001` in environment variables.
+
+### Step B: Deploy Node Backend (Render/Railway)
+**Root Directory:** `server`  
+**Port:** 5000
+1. Set `PYTHON_URL` to your Python service URL (e.g., `https://sociofest-ai.onrender.com`).
+2. Set `GEMINI_API_KEY` for text generation.
+
+### Step C: Deploy Frontend (Vercel)
+**Root Directory:** `client`
+1. Set `VITE_BACKEND_URL` (Node) and `VITE_PYTHON_URL` (Python).
+2. Note: The frontend uses proxy rewrites (`/python-api` -> `5001`) automatically.
+
+---
+
+## 🖥️ 4. Local Development
+
 ```bash
-# Python AI setup
+# Start the unified AI Gateway
 cd server/python_modules
-python -m venv venv
-venv\Scripts\activate # Windows
-source venv/bin/activate # Mac/Linux
-pip install -r requirements.txt
+python app.py
 
-# Run services
-npm --prefix server run dev  # Backend :5000
-npm --prefix client run dev  # Frontend :5173
-# Python (separate terminals)
-python -m waitress 0.0.0.0:5001 app:app  # Face AI
-uvicorn custom_ai_api:app --host 0.0.0.0 --port 8000  # Voice AI
+# Start Node Backend
+cd server
+npm run dev
 
-# Quick start
-smart-deploy.bat  # Interactive selector!
-```
-
-**Ports Used:** 5173 (FE), 5000 (BE), 5001 (Face), 8000 (Voice)
-
-### B. Docker Local (Recommended Dev)
-```bash
-docker compose -f docker-compose.yml up -d  # Basic
-docker compose -f docker-compose.full.yml up -d  # Full + Nginx
-```
-
-### C. Cloud Production (Railway/Render/DO)
-1. **Push to Git** (Railway auto-deploy)
-2. **Add .env vars** in platform dashboard
-3. **docker-compose.cloud.yml** for external MongoDB Atlas + Redis:
-```
-MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/sociofest
-REDIS_URL=redis://default:pass@redis-host:6379
-VITE_CLIENT_URL=https://yourdomain.com
-```
-4. **SSL**: Upload certs to `./ssl/` + nginx.conf
-5. `docker compose -f docker-compose.cloud.yml up -d`
-
-**Railway:** `railway up --dockerfile Dockerfile.prod`
-**Render:** Service → Docker → docker-compose.full.yml
-
-### D. VPS Manual (Ubuntu)
-```bash
-apt update && apt install -y nginx docker docker-compose nodejs npm python3 python3-venv ffmpeg
-git clone repo && cd sociofest
-npm install && npm --prefix client/server install
-docker compose -f docker-compose.full.yml up -d
-
-# Nginx reverse proxy (nginx.conf)
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-**SSL (Certbot):**
-```bash
-apt install certbot python3-certbot-nginx
-certbot --nginx -d yourdomain.com
+# Start Frontend
+cd client
+npm run dev
 ```
 
 ---
 
-## 4. Service Health Check
-```
-http://localhost:5173  # Frontend
-http://localhost:5000/health  # Backend ✓
-http://localhost:5001/health  # Python ✓
-http://localhost:8000/docs  # Voice AI ✓
-```
+## ❓ 5. Troubleshooting AI Modules
 
-**Wait Tool:** `npx wait-on http://localhost:5000/health http://localhost:5001/health`
+- **AI Timeout:** If using a free-tier hosting (like Render Free), the first AI request might time out while the model is "waking up". Always check the logs to see if the model is still loading.
+- **CORS Errors:** If the AI says "Access Denied", ensure `FRONTEND_URL` in the Python `.env` exactly matches your Vercel URL.
+- **404 Errors:** If Voice/Image routes return 404, ensure you are hitting `/voice-api/...` or `/sd-api/...` and that the blueprints are registered in `app.py`.
+- **Memory Issues:** Voice and Image AI require ~4GB RAM minimum. If your server crashes, upgrade your RAM or use Swap space.
 
-## 5. Domain Setup
-1. A record → server IP
-2. Update VITE_CLIENT_URL=yourdomain.com
-3. Nginx SSL volume mount
-4. Restart: `docker compose restart`
+## 🛡️ 6. Attendance & Security Linking
+- **Self-Marking:** Students can mark attendance via `/api/attendance/self-mark-face`.
+- **Verification Chain:** Frontend (Image) → Node Proxy → Python `verify-face` → MongoDB Match → Node Response.
+- **Spoof Protection:** The server performs identity verification against the JWT. Students cannot mark attendance for other user IDs, even if they have their photo.
 
-## 6. Troubleshooting
-- **Port conflict**: `npx kill-port 5000`
-- **Python deps**: Delete `server/python_modules/venv` → recreate
-- **Mongo connection**: Test `mongosh mongodb://localhost:27017`
-- **Build fail**: `npm run build --prefix client` + check logs
+---
 
-## 7. Quick Commands
-```bash
-# Logs
-docker logs -f sociofest-backend
-
-# Restart
-docker compose restart
-
-# Scale
-docker compose up --scale python-service=2 -d
-
-# Backup
-docker exec sociofest-mongo mongodump --out=/dump
-```
-
-**Production Ready!** Questions? 🚀
+**Everything is now Integrated!** 🚀
+*One API to rule them all.*

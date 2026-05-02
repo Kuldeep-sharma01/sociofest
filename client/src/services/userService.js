@@ -240,15 +240,20 @@ export const bulkUpdateUserStatus = async (
 };
 
 export const addEmail = async (email) => {
-  const res = await apiClient.post(`${API_BASE}/profile/add-email`, { email });
+  const res = await apiClient.post(`${API_BASE}/add-email`, { email });
   return res.data;
 };
 
 export const verifyNewEmail = async (emailData) => {
   const res = await apiClient.post(
-    `${API_BASE}/profile/verify-email`,
+    `${API_BASE}/verify-email`,
     emailData,
   );
+  return res.data;
+};
+
+export const resendNewEmailOTP = async (email) => {
+  const res = await apiClient.post(`${API_BASE}/resend-email-otp`, { email });
   return res.data;
 };
 
