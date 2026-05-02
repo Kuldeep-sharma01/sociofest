@@ -1,5 +1,6 @@
 import vm from 'node:vm';
 import rateLimit from 'express-rate-limit';
+import { readSystemSettings } from '../utils/systemSettings.js';
 
 const compilerLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -11,6 +12,11 @@ export const compileCode = [
   compilerLimiter,
   async (req, res) => {
     try {
+      const systemSettings = await readSystemSettings();
+      if (systemSettings.serviceControls?.compilerEnabled === false) {
+        return res.status(403).json({ error: 'Code compiler is currently disabled by admin.' });
+      }
+
       const { language, code, stdin } = req.body;
 
       if (!code || !language) {

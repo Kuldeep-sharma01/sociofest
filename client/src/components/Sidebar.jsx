@@ -51,6 +51,7 @@ const Sidebar = ({ sidebar }) => {
     notices: 0,
     activities: 0,
   });
+  const [sysSettings, setSysSettings] = useState(null);
   const [navConfig, setNavConfig] = useState([]);
 
   const locationRef = useRef(location.pathname);
@@ -64,9 +65,12 @@ const Sidebar = ({ sidebar }) => {
   }, [user]);
 
   useEffect(() => {
-    // Fetch Admin's dynamic navigation layout
+    // Fetch Admin's dynamic navigation layout and feature toggles
     getPublicSystemSettings().then((s) => {
-      if (s?.navigationConfig) setNavConfig(s.navigationConfig);
+      if (s) {
+        setSysSettings(s);
+        if (s.navigationConfig) setNavConfig(s.navigationConfig);
+      }
     }).catch(() => console.log("Using default nav order"));
   }, []);
 
@@ -342,13 +346,41 @@ const Sidebar = ({ sidebar }) => {
     ...(matchedRoleKey ? roleSpecificItems[matchedRoleKey] : []),
   ];
 
+  // 1. Map system-wide feature toggles to items
+  const featureToggleMap = {
+    "/chat": "chatEnabled",
+    "/ai-hub": "aiEnabled",
+    "/attendance": "attendanceEnabled",
+    "/marketplace": "marketplaceEnabled",
+    "/compiler": "compilerEnabled",
+    "/notice-board": "notificationsEnabled",
+    "/activities": "notificationsEnabled",
+  };
+
   // Then apply Admin's dynamic sorting and visibility rules
   if (navConfig && navConfig.length > 0) {
     roleFilteredItems = roleFilteredItems.map(item => {
       const config = navConfig.find(c => c.path === item.path);
-      // If the admin hid it, mark it false. If order exists, map it. Otherwise push it to the bottom.
-      return { ...item, visible: config ? (config.visible !== false) : true, order: config ? config.order : 99 };
+      const featureKey = featureToggleMap[item.path];
+      
+      // Feature is visible only if:
+      // 1. Admin hasn't manually hidden it in navConfig AND
+      // 2. Global service control (if any) is enabled
+      const isFeatureEnabled = featureKey ? (sysSettings?.serviceControls?.[featureKey] !== false) : true;
+      const isVisibleInNav = config ? (config.visible !== false) : true;
+
+      return { 
+        ...item, 
+        visible: isVisibleInNav && isFeatureEnabled, 
+        order: config ? config.order : 99 
+      };
     }).filter(item => item.visible).sort((a, b) => a.order - b.order);
+  } else if (sysSettings?.serviceControls) {
+    // Fallback if navConfig is empty but serviceControls exist
+    roleFilteredItems = roleFilteredItems.filter(item => {
+      const featureKey = featureToggleMap[item.path];
+      return featureKey ? (sysSettings.serviceControls[featureKey] !== false) : true;
+    });
   }
 
   return (

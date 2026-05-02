@@ -15,6 +15,10 @@ import Department from "../models/Department.js";
 import Comment from "../models/Comment.js";
 import AssignmentSubmission from "../models/AssignmentSubmission.js";
 import QuizSubmission from "../models/QuizSubmission.js";
+import Student from "../models/Student.js";
+import Teacher from "../models/Teacher.js";
+import HOD from "../models/HOD.js";
+import Seller from "../models/Seller.js";
 import {
   logActivity,
   getChanges,
@@ -408,6 +412,43 @@ export const updateUserRole = async (req, res) => {
     }
 
     await targetUser.save();
+
+    // Profile lifecycle management
+    if (newRole) {
+      // 1. Delete irrelevant profiles (Only if NOT moving to Admin)
+      if (newRole !== "Admin") {
+        if (newRole !== "HOD") {
+          await HOD.deleteOne({ userId: targetUser._id });
+          await Department.updateMany({ hod: targetUser._id }, { $set: { hod: null } });
+        }
+        if (newRole !== "Teacher" && newRole !== "HOD") {
+          await Teacher.deleteOne({ userId: targetUser._id });
+        }
+        if (newRole !== "Student") {
+          await Student.deleteOne({ userId: targetUser._id });
+        }
+        if (newRole !== "Seller") {
+          await Seller.deleteOne({ userId: targetUser._id });
+        }
+      }
+
+      // 2. Ensure target profile exists for the primary role
+      if (newRole === "HOD") {
+        const existing = await HOD.findOne({ userId: targetUser._id });
+        if (!existing) await HOD.create({ userId: targetUser._id, department: targetUser.department });
+        const existingTeacher = await Teacher.findOne({ userId: targetUser._id });
+        if (!existingTeacher) await Teacher.create({ userId: targetUser._id, department: targetUser.department });
+      } else if (newRole === "Teacher") {
+        const existing = await Teacher.findOne({ userId: targetUser._id });
+        if (!existing) await Teacher.create({ userId: targetUser._id, department: targetUser.department });
+      } else if (newRole === "Student") {
+        const existing = await Student.findOne({ userId: targetUser._id });
+        if (!existing) await Student.create({ userId: targetUser._id, department: targetUser.department });
+      } else if (newRole === "Seller") {
+        const existing = await Seller.findOne({ userId: targetUser._id });
+        if (!existing) await Seller.create({ userId: targetUser._id });
+      }
+    }
 
     // Log the change
     await logActivity({

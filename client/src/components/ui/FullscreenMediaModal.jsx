@@ -194,7 +194,7 @@ const getInitialSubStyle = () => {
         return { ...defaultSubtitleStyle, ...parsed };
       }
     }
-  } catch (e) {}
+  } catch (e) { }
   return defaultSubtitleStyle;
 };
 
@@ -262,6 +262,8 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
   const [targetLang, setTargetLang] = useState("English");
   const [sourceLang, setSourceLang] = useState("Auto-Detect");
   const [targetVoice, setTargetVoice] = useState("Auto");
+  const [translatedScript, setTranslatedScript] = useState("");
+  const [mergeBackground, setMergeBackground] = useState(true);
   const [activeVoiceEffect, setActiveVoiceEffect] = useState("none");
   const [voiceEffectIntensity, setVoiceEffectIntensity] = useState(100);
   const [aspectRatio, setAspectRatio] = useState("auto");
@@ -271,6 +273,8 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
   const [showSubSettings, setShowSubSettings] = useState(false);
   const [showChapters, setShowChapters] = useState(false);
   const [showThumbnails, setShowThumbnails] = useState(false);
+  const [resolutions, setResolutions] = useState([]);
+  const [activeResolution, setActiveResolution] = useState(-1);
 
   // WebRTC Live Dubbing State
   const [isLiveDubbing, setIsLiveDubbing] = useState(false);
@@ -413,7 +417,7 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
       }
       recordedChunksRef.current = [];
       if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
-        audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current.close().catch(() => { });
       }
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(t => t.stop());
@@ -429,18 +433,18 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
     const handleAnswer = async (e) => {
       const { sdp, mediaId } = e.detail;
       if (mediaId === media?.url && rtcPeerRef.current) {
-        try { 
-          await rtcPeerRef.current.setRemoteDescription(new RTCSessionDescription(sdp)); 
-        } catch(err) { console.error("WebRTC Answer error", err); }
+        try {
+          await rtcPeerRef.current.setRemoteDescription(new RTCSessionDescription(sdp));
+        } catch (err) { console.error("WebRTC Answer error", err); }
       }
     };
-    
+
     const handleIceCandidate = async (e) => {
       const { candidate, mediaId } = e.detail;
       if (mediaId === media?.url && rtcPeerRef.current && candidate) {
-        try { 
-          await rtcPeerRef.current.addIceCandidate(new RTCIceCandidate(candidate)); 
-        } catch(err) { console.error("WebRTC ICE candidate error", err); }
+        try {
+          await rtcPeerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) { console.error("WebRTC ICE candidate error", err); }
       }
     };
 
@@ -465,10 +469,10 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
         const bitrate =
           v.currentTime > 0 && v.webkitVideoDecodedByteCount
             ? (
-                (v.webkitVideoDecodedByteCount * 8) /
-                v.currentTime /
-                1000
-              ).toFixed(0)
+              (v.webkitVideoDecodedByteCount * 8) /
+              v.currentTime /
+              1000
+            ).toFixed(0)
             : 0;
 
         setVideoStats({
@@ -595,7 +599,7 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
             break;
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     }
     onClose();
   };
@@ -618,12 +622,12 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
           ) {
             try {
               await window.screen.orientation.lock("landscape");
-            } catch (err) {}
+            } catch (err) { }
           }
         } else if (video?.webkitEnterFullscreen) {
           video.webkitEnterFullscreen();
         }
-      } catch (err) {}
+      } catch (err) { }
     } else {
       try {
         if (document.exitFullscreen) {
@@ -635,10 +639,10 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
           ) {
             try {
               window.screen.orientation.unlock();
-            } catch (err) {}
+            } catch (err) { }
           }
         }
-      } catch (err) {}
+      } catch (err) { }
     }
   };
 
@@ -1392,9 +1396,9 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
   useEffect(() => {
     // Accessibility: Auto-focus the close button or container on open
     const timer = setTimeout(() => {
-       const closeBtn = containerRef.current?.querySelector('button[title*="Close"]');
-       if (closeBtn) closeBtn.focus();
-       else containerRef.current?.focus();
+      const closeBtn = containerRef.current?.querySelector('button[title*="Close"]');
+      if (closeBtn) closeBtn.focus();
+      else containerRef.current?.focus();
     }, 100);
 
     const handleKeyDown = (e) => {
@@ -1433,7 +1437,7 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
 
       if (e.key === "Escape" && !isLocked) {
         if (document.fullscreenElement) {
-          document.exitFullscreen().catch(() => {});
+          document.exitFullscreen().catch(() => { });
           return;
         }
         handleClose();
@@ -1562,6 +1566,8 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
     setActiveTextTrack(-1);
     setAudioTracks([]);
     setActiveAudioTrack(-1);
+    setResolutions([]);
+    setActiveResolution(-1);
     setActiveVoiceEffect("none");
     setVoiceEffectIntensity(100);
     setSourceLang("Auto-Detect");
@@ -1570,7 +1576,7 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
     setObjectFit("contain");
     setIsPanModeActive(false);
     setIsAtmosOn(false);
-    
+
     if (isLiveDubbing) {
       setIsLiveDubbing(false);
       if (localStreamRef.current) localStreamRef.current.getTracks().forEach(t => t.stop());
@@ -1592,7 +1598,7 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
     setBassBoost(0);
     setTrebleBoost(0);
     if (audioCtxRef.current) {
-      audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current.close().catch(() => { });
       audioCtxRef.current = null;
       eqBandsRef.current = {};
     }
@@ -1648,7 +1654,7 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
             delete savedProgress[safeUrl];
           }
           localStorage.setItem("sociofest_video_progress", JSON.stringify(savedProgress));
-        } catch (err) {}
+        } catch (err) { }
       }
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
@@ -1962,11 +1968,11 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
                   s.url.startsWith("http") || s.url.startsWith("blob:")
                     ? s.url
                     : new URL(
-                        s.url,
-                        safeUrl.startsWith("http")
-                          ? safeUrl
-                          : window.location.origin,
-                      ).href,
+                      s.url,
+                      safeUrl.startsWith("http")
+                        ? safeUrl
+                        : window.location.origin,
+                    ).href,
               })),
             );
             window.dispatchEvent(
@@ -1982,11 +1988,11 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
                 t.url.startsWith("http") || t.url.startsWith("blob:")
                   ? t.url
                   : new URL(
-                      t.url,
-                      safeUrl.startsWith("http")
-                        ? safeUrl
-                        : window.location.origin,
-                    ).href,
+                    t.url,
+                    safeUrl.startsWith("http")
+                      ? safeUrl
+                      : window.location.origin,
+                  ).href,
             }));
             setAudioTracks([
               { url: null, label: "Original Video Audio" },
@@ -2002,6 +2008,22 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
             setAudioTracks(defaultAudio);
             setActiveAudioTrack(0);
           }
+
+          if (data.resolutions?.length > 0) {
+            const mappedRes = data.resolutions.map((r) => ({
+              ...r,
+              url:
+                r.url.startsWith("http") || r.url.startsWith("blob:")
+                  ? r.url
+                  : new URL(
+                    r.url,
+                    safeUrl.startsWith("http")
+                      ? safeUrl
+                      : window.location.origin,
+                  ).href,
+            }));
+            setResolutions(mappedRes);
+          }
         })
         .catch(() => {
           // Fallback to old single extraction guess
@@ -2014,7 +2036,7 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
                 ]);
               }
             })
-            .catch(() => {});
+            .catch(() => { });
 
           setAudioTracks(defaultAudio);
           setActiveAudioTrack(0);
@@ -2038,7 +2060,7 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
     };
 
     const handlePlay = () => {
-      if (activeAudioTrack > 0) customAudio.play().catch(() => {});
+      if (activeAudioTrack > 0) customAudio.play().catch(() => { });
     };
     const handlePause = () => {
       if (activeAudioTrack > 0) customAudio.pause();
@@ -2087,7 +2109,7 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
         videoRef.current &&
         isPlaying
       ) {
-        setTimeout(() => videoRef.current?.play().catch(() => {}), 50);
+        setTimeout(() => videoRef.current?.play().catch(() => { }), 50);
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -2459,7 +2481,7 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
     if (isLocked) return;
     try {
       if (e.target.setPointerCapture) e.target.setPointerCapture(e.pointerId);
-    } catch (err) {}
+    } catch (err) { }
     activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
     if (activePointers.current.size === 2) {
@@ -2845,91 +2867,6 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
     e.target.value = null; // Reset input
   };
 
-  const handleAITranslate = async () => {
-    setIsTranslating(true);
-    try {
-      window.dispatchEvent(
-        new CustomEvent("showToast", {
-          detail: `AI translating & dubbing to ${targetLang}... ⏳`,
-        }),
-      );
-
-      let sourceText = "";
-      if (activeTextTrack !== -1 && textTracks[activeTextTrack]?.url) {
-        sourceText = await fetchTextResource(textTracks[activeTextTrack].url);
-      }
-
-      // Ensure we only use original video audio as the source, never an AI Dub track
-      let selectedAudioSource = safeUrl;
-      if (activeAudioTrack > 0 && audioTracks[activeAudioTrack]?.url) {
-        if (!audioTracks[activeAudioTrack].label.includes("AI Dub")) {
-          selectedAudioSource = audioTracks[activeAudioTrack].url;
-        }
-      }
-
-      // Real Backend API Call to the Multi-Step AI Pipeline
-      const data = await translateMedia({
-        text: sourceText,
-        sourceLanguage: sourceLang,
-        targetLanguage: targetLang,
-        targetVoice: targetVoice,
-        generateAudio: true,
-        sourceAudioUrl: selectedAudioSource,
-      });
-      const translatedVtt = data.translatedVtt;
-
-      // Auto-resolve relative audio URL from backend
-      const translatedAudioUrl = data.translatedAudioUrl 
-        ? (data.translatedAudioUrl.startsWith("http")
-          ? data.translatedAudioUrl
-          : new URL(
-              data.translatedAudioUrl,
-              safeUrl.startsWith("http") ? safeUrl : window.location.origin,
-            ).href)
-        : null;
-
-      const vttBlob = new Blob([translatedVtt], { type: "text/vtt" });
-      const vttUrl = URL.createObjectURL(vttBlob);
-
-      // 1. Add generated Subtitle Track
-      setTextTracks((prev) => {
-        const next = [...prev, { url: vttUrl, label: `AI: ${targetLang}` }];
-        setActiveTextTrack(next.length - 1);
-        setSubtitleUrl(vttUrl);
-        return next;
-      });
-
-      // 2. Add generated Audio Dub Track
-      if (translatedAudioUrl) {
-        setAudioTracks((prev) => {
-          const next = [
-            ...prev,
-            { url: translatedAudioUrl, label: `AI Dub: ${targetLang}` },
-          ];
-          setTimeout(
-            () => handleAudioTrackChange(next.length - 1, translatedAudioUrl),
-            50,
-          );
-          return next;
-        });
-      }
-
-      window.dispatchEvent(
-        new CustomEvent("showToast", {
-          detail: "Translation & Dubbing complete! ✨",
-        }),
-      );
-    } catch (err) {
-      console.error(err);
-      window.dispatchEvent(
-        new CustomEvent("showToast", {
-          detail: err.message || "Translation failed. ❌",
-        }),
-      );
-    } finally {
-      setIsTranslating(false);
-    }
-  };
 
   const handleMirror = (e) => {
     e.stopPropagation();
@@ -2953,7 +2890,7 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
     const targetUrl = forceUrl !== null ? forceUrl : audioTracks[index]?.url;
 
     if (audioCtxRef.current?.state === "suspended") {
-      audioCtxRef.current.resume().catch(() => {});
+      audioCtxRef.current.resume().catch(() => { });
     }
 
     if (index === 0 || !targetUrl) {
@@ -2993,9 +2930,44 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
       customAudioRef.current.currentTime = videoRef.current.currentTime;
       customAudioRef.current.playbackRate = videoRef.current.playbackRate;
       if (!videoRef.current.paused) {
-        customAudioRef.current.play().catch(() => {});
+        customAudioRef.current.play().catch(() => { });
       }
     }
+  };
+
+  const handleResolutionChange = (index) => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const currentTime = video.currentTime;
+    const wasPlaying = !video.paused;
+
+    setActiveResolution(index);
+
+    // If index is -1, it means we switch back to the main URL (which might be HLS)
+    const targetUrl = index === -1 ? safeUrl : resolutions[index].url;
+
+    // Destroy HLS instance if we are forcing a static resolution MP4
+    if (index !== -1 && video.__hlsInstance) {
+      video.__hlsInstance.destroy();
+      video.__hlsInstance = null;
+    }
+
+    video.src = targetUrl;
+    video.load();
+
+    // Resume at the same time
+    const onLoaded = () => {
+      video.removeEventListener("loadedmetadata", onLoaded);
+      video.currentTime = currentTime;
+      if (wasPlaying) video.play().catch(() => { });
+
+      window.dispatchEvent(
+        new CustomEvent("showToast", {
+          detail: `Quality switched to ${index === -1 ? "Auto / Original" : resolutions[index].label} 🎥`,
+        }),
+      );
+    };
+    video.addEventListener("loadedmetadata", onLoaded);
   };
 
   const handleSubtitleToggle = (e) => {
@@ -3043,6 +3015,157 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
       return next;
     });
   };
+  const handleAITranslate = async () => {
+    // Legacy instant mode: Translate + Dub in one go
+    const script = await handleTranslateOnly();
+    if (script) {
+      // Wait for script to be available and dub it
+      handleDubOnly(script);
+    }
+  };
+
+  const handleTranslateOnly = async () => {
+    if (!videoRef.current) return;
+    setIsTranslating(true);
+    try {
+      // 1. Get original text (transcription)
+      let sourceText = "";
+      if (activeTextTrack !== -1) {
+        const track = textTracks[activeTextTrack];
+        const res = await fetch(track.url);
+        sourceText = await res.text();
+      } else {
+        window.dispatchEvent(
+          new CustomEvent("showToast", {
+            detail: "No subtitles selected. Using auto-transcription... 🎙️",
+          }),
+        );
+        // If no track is selected, we try to fetch the first one or default manifest
+        if (textTracks.length > 0) {
+          const res = await fetch(textTracks[0].url);
+          sourceText = await res.text();
+        } else {
+          window.dispatchEvent(
+            new CustomEvent("showToast", {
+              detail: "Auto-transcribing video... this may take a moment ⏳",
+            })
+          );
+
+          const transcribeRes = await fetch("/api/ai/transcribe", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${localStorage.getItem("token")}`
+            },
+            body: JSON.stringify({ sourceAudioUrl: safeUrl })
+          });
+
+          if (!transcribeRes.ok) throw new Error("Auto-transcription failed.");
+          const transcribeData = await transcribeRes.json();
+          sourceText = transcribeData.vtt || transcribeData.text;
+
+          if (!sourceText) {
+            throw new Error("No speech detected in video.");
+          }
+        }
+      }
+
+      // 2. Call Translation API
+      const result = await translateMedia({
+        text: sourceText,
+        sourceLanguage: sourceLang,
+        targetLanguage: targetLang,
+      });
+
+      setTranslatedScript(result.translatedVtt || result.translatedText);
+      window.dispatchEvent(
+        new CustomEvent("showToast", {
+          detail: "Script translated! You can now edit it before dubbing. 📝",
+        }),
+      );
+      return result.translatedVtt || result.translatedText;
+    } catch (err) {
+      console.error("Translation failed", err);
+      window.dispatchEvent(
+        new CustomEvent("showToast", {
+          detail: "Translation failed. ❌",
+        }),
+      );
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+  const handleDubOnly = async (scriptOverride) => {
+    if (!videoRef.current) return;
+    const scriptToUse = (typeof scriptOverride === 'string') ? scriptOverride : translatedScript;
+
+    if (!scriptToUse) {
+      window.dispatchEvent(
+        new CustomEvent("showToast", {
+          detail: "Please translate a script first! 📝",
+        }),
+      );
+      return;
+    }
+
+    setIsTranslating(true);
+    try {
+      window.dispatchEvent(
+        new CustomEvent("showToast", {
+          detail: "Dubbing audio... This may take a moment. 🎧",
+        }),
+      );
+
+      // Call the TTS API with background merging choice
+      const response = await fetch("/api/ai/text-to-speech", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${localStorage.getItem("token")}`
+        },
+        body: JSON.stringify({
+          text: scriptToUse,
+          language: targetLang,
+          voice: targetVoice,
+          provider: "local",
+          mergeBackground: mergeBackground,
+          sourceAudioUrl: safeUrl,
+        })
+      });
+
+      if (!response.ok) throw new Error("Dubbing failed at server");
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const newTrack = {
+        url: audioUrl,
+        label: `AI Dub (${targetLang}) ${mergeBackground ? "+ Surround" : ""}`,
+      };
+
+      setAudioTracks((prev) => {
+        const next = [...prev, newTrack];
+        setTimeout(() => setActiveAudioTrack(next.length - 1), 100);
+        return next;
+      });
+
+      window.dispatchEvent(
+        new CustomEvent("showToast", {
+          detail: "AI Dubbing complete! Audio track added. 🎵",
+        }),
+      );
+    } catch (err) {
+      console.error("Dubbing failed", err);
+      window.dispatchEvent(
+        new CustomEvent("showToast", {
+          detail: "Dubbing failed. ❌",
+        }),
+      );
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
   const handleBassChange = (e) => {
     const value = Number(e.target.value);
     setBassBoost(value);
@@ -3073,73 +3196,73 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
       window.dispatchEvent(new CustomEvent("showToast", { detail: "Live WebRTC Dubbing stopped. 🛑" }));
     } else {
       try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-localStreamRef.current = stream;
-            // Route Microphone through WebAudio API for Real-Time Voice Effects
-            if (!audioCtxRef.current) initAudioEngine();
-            const ctx = audioCtxRef.current || new (window.AudioContext || window.webkitAudioContext)();
-            if (!audioCtxRef.current) audioCtxRef.current = ctx;
-            
-            const micSource = ctx.createMediaStreamSource(stream);
-            const destNode = ctx.createMediaStreamDestination();
-            
-            // Apply selected Voice Effect to the Broadcast Stream
-            if (activeVoiceEffect === 'robot') {
-              const osc = ctx.createOscillator();
-              osc.type = 'sawtooth';
-              osc.frequency.value = 50;
-              const ring = ctx.createGain();
-              ring.gain.value = 0;
-              osc.connect(ring.gain);
-              osc.start();
-              micSource.connect(ring).connect(destNode);
-            } else if (activeVoiceEffect === 'alien') {
-              const delay = ctx.createDelay();
-              delay.delayTime.value = 0.05;
-              micSource.connect(delay).connect(destNode);
-              micSource.connect(destNode); // Mix wet and dry
-            } else if (activeVoiceEffect === 'echo' || activeVoiceEffect === 'cave') {
-              const delay = ctx.createDelay();
-              delay.delayTime.value = activeVoiceEffect === 'cave' ? 0.15 : 0.3;
-              const feedback = ctx.createGain();
-              feedback.gain.value = activeVoiceEffect === 'cave' ? 0.6 : 0.4;
-              micSource.connect(delay).connect(feedback).connect(delay);
-              delay.connect(destNode);
-              micSource.connect(destNode); // Mix wet and dry
-            } else {
-              // Dry Signal (Normal Voice)
-              micSource.connect(destNode);
-            }
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+        localStreamRef.current = stream;
+        // Route Microphone through WebAudio API for Real-Time Voice Effects
+        if (!audioCtxRef.current) initAudioEngine();
+        const ctx = audioCtxRef.current || new (window.AudioContext || window.webkitAudioContext)();
+        if (!audioCtxRef.current) audioCtxRef.current = ctx;
 
-            const trackToBroadcast = destNode.stream.getAudioTracks()[0];
+        const micSource = ctx.createMediaStreamSource(stream);
+        const destNode = ctx.createMediaStreamDestination();
+
+        // Apply selected Voice Effect to the Broadcast Stream
+        if (activeVoiceEffect === 'robot') {
+          const osc = ctx.createOscillator();
+          osc.type = 'sawtooth';
+          osc.frequency.value = 50;
+          const ring = ctx.createGain();
+          ring.gain.value = 0;
+          osc.connect(ring.gain);
+          osc.start();
+          micSource.connect(ring).connect(destNode);
+        } else if (activeVoiceEffect === 'alien') {
+          const delay = ctx.createDelay();
+          delay.delayTime.value = 0.05;
+          micSource.connect(delay).connect(destNode);
+          micSource.connect(destNode); // Mix wet and dry
+        } else if (activeVoiceEffect === 'echo' || activeVoiceEffect === 'cave') {
+          const delay = ctx.createDelay();
+          delay.delayTime.value = activeVoiceEffect === 'cave' ? 0.15 : 0.3;
+          const feedback = ctx.createGain();
+          feedback.gain.value = activeVoiceEffect === 'cave' ? 0.6 : 0.4;
+          micSource.connect(delay).connect(feedback).connect(delay);
+          delay.connect(destNode);
+          micSource.connect(destNode); // Mix wet and dry
+        } else {
+          // Dry Signal (Normal Voice)
+          micSource.connect(destNode);
+        }
+
+        const trackToBroadcast = destNode.stream.getAudioTracks()[0];
 
 
         // Initialize WebRTC Peer Connection (Requires Signaling Server to exchange SDP)
         const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
         rtcPeerRef.current = pc;
-        
+
         // Emit local ICE candidates to the global bus so the socket can broadcast them to viewers
         pc.onicecandidate = (event) => {
           if (event.candidate) {
-            window.dispatchEvent(new CustomEvent("webrtc-ice-candidate-emitted", { 
-              detail: { candidate: event.candidate, mediaId: media.url, to: "viewers" } 
+            window.dispatchEvent(new CustomEvent("webrtc-ice-candidate-emitted", {
+              detail: { candidate: event.candidate, mediaId: media.url, to: "viewers" }
             }));
           }
         };
 
-            pc.addTrack(trackToBroadcast, destNode.stream);
+        pc.addTrack(trackToBroadcast, destNode.stream);
 
         // Generate the SDP offer to send to the signaling server (e.g., Socket.io)
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-            // Emit the WebRTC offer through global event bus to be picked up by the Socket Context
-            window.dispatchEvent(new CustomEvent("webrtc-offer-created", { 
-               detail: { sdp: pc.localDescription, type: "dubbing", mediaId: media.url } 
-            }));
+        // Emit the WebRTC offer through global event bus to be picked up by the Socket Context
+        window.dispatchEvent(new CustomEvent("webrtc-offer-created", {
+          detail: { sdp: pc.localDescription, type: "dubbing", mediaId: media.url }
+        }));
 
         // Duck the video volume so the mic doesn't catch heavy echo
         if (videoRef.current) videoRef.current.volume = 0.15;
-        
+
         setIsLiveDubbing(true);
         window.dispatchEvent(new CustomEvent("showToast", { detail: "WebRTC Live Dubbing started! Broadcasting... 🎙️" }));
       } catch (err) {
@@ -3201,7 +3324,7 @@ localStreamRef.current = stream;
           e.target.currentTime = savedProgress[safeUrl];
           window.dispatchEvent(new CustomEvent("showToast", { detail: "Resumed from checkpoint ⏯️" }));
         }
-      } catch (err) {}
+      } catch (err) { }
     }
   };
 
@@ -3835,6 +3958,15 @@ localStreamRef.current = stream;
           setTargetVoice={setTargetVoice}
           isTranslating={isTranslating}
           handleAITranslate={handleAITranslate}
+          resolutions={resolutions}
+          activeResolution={activeResolution}
+          handleResolutionChange={handleResolutionChange}
+          translatedScript={translatedScript}
+          setTranslatedScript={setTranslatedScript}
+          handleTranslateOnly={handleTranslateOnly}
+          handleDubOnly={handleDubOnly}
+          mergeBackground={mergeBackground}
+          setMergeBackground={setMergeBackground}
         />
       )}
 
@@ -3957,7 +4089,7 @@ localStreamRef.current = stream;
                         className="p-2 hover:bg-white/20 rounded-full transition-colors text-white"
                       >
                         {videoRef.current?.muted ||
-                        videoRef.current?.volume === 0 ? (
+                          videoRef.current?.volume === 0 ? (
                           <VolumeX className="w-5 h-5" />
                         ) : (
                           <Volume2 className="w-5 h-5" />
@@ -4134,8 +4266,8 @@ localStreamRef.current = stream;
                 ref={videoRef}
                 poster={
                   safeUrl &&
-                  !safeUrl.startsWith("blob:") &&
-                  /\.(mp4|webm|ogg|mkv|mov)(\?.*)?$/i.test(safeUrl)
+                    !safeUrl.startsWith("blob:") &&
+                    /\.(mp4|webm|ogg|mkv|mov)(\?.*)?$/i.test(safeUrl)
                     ? safeUrl.replace(/\.[^/.]+$/, "_thumb.jpg")
                     : undefined
                 }
@@ -4163,7 +4295,7 @@ localStreamRef.current = stream;
                       const keys = Object.keys(savedProgress);
                       if (keys.length > 50) delete savedProgress[keys[0]];
                       localStorage.setItem("sociofest_video_progress", JSON.stringify(savedProgress));
-                    } catch(err) {}
+                    } catch (err) { }
                   }
 
                   if (!duration || isNaN(duration) || duration === 0) {

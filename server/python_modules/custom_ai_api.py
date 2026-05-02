@@ -17,6 +17,57 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning, module="jieba")
 warnings.filterwarnings("ignore", message=".*pkg_resources is deprecated.*")
 
+# Monkeypatch for huggingface_hub compatibility
+try:
+    import huggingface_hub
+    huggingface_hub.__version__ = "0.23.0"
+except Exception:
+    pass
+
+try:
+    import huggingface_hub
+    if not hasattr(huggingface_hub, 'HfFolder'):
+        class DummyHfFolder:
+            @staticmethod
+            def get_token(): return os.getenv("HF_TOKEN")
+            @staticmethod
+            def save_token(token): pass
+        huggingface_hub.HfFolder = DummyHfFolder
+except Exception:
+    pass
+
+try:
+    import huggingface_hub
+    import huggingface_hub.file_download
+    if not hasattr(huggingface_hub, 'cached_download'):
+        huggingface_hub.cached_download = huggingface_hub.file_download.hf_hub_download
+        huggingface_hub.file_download.cached_download = huggingface_hub.file_download.hf_hub_download
+except Exception:
+    pass
+
+try:
+    import importlib.metadata
+    _orig_version = importlib.metadata.version
+    def _patched_version(pkg):
+        if pkg in ('huggingface-hub', 'huggingface_hub'):
+            return '0.23.0'
+        return _orig_version(pkg)
+    importlib.metadata.version = _patched_version
+except Exception:
+    pass
+
+try:
+    import pkg_resources
+    _orig_get_dist = pkg_resources.get_distribution
+    def _patched_get_dist(pkg):
+        if pkg in ('huggingface-hub', 'huggingface_hub'):
+            class _MockDist: version = '0.23.0'
+            return _MockDist()
+        return _orig_get_dist(pkg)
+    pkg_resources.get_distribution = _patched_get_dist
+except Exception:
+    pass
+
 import torch
 import torchaudio
 import soundfile as sf
@@ -157,7 +208,7 @@ def get_tts():
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...), _user=Depends(verify_token)):
     safe_ext = pathlib.Path(file.filename).suffix.lower()
-    ALLOWED_AUDIO_EXTS = {'.wav', '.mp3', '.ogg', '.m4a', '.flac'}
+    ALLOWED_AUDIO_EXTS = {'.wav', '.mp3', '.ogg', '.m4a', '.flac', '.mp4', '.mkv', '.webm', '.avi'}
     if safe_ext not in ALLOWED_AUDIO_EXTS:
         raise HTTPException(status_code=400, detail="Unsupported audio format")
     safe_filename = f"{uuid.uuid4().hex}{safe_ext}"
@@ -290,7 +341,7 @@ async def clone_voice(
     text = text[:2000]  # Cap text to prevent TTS memory exhaustion
 
     safe_ext = pathlib.Path(speaker_wav.filename).suffix.lower()
-    ALLOWED_AUDIO_EXTS = {'.wav', '.mp3', '.ogg', '.m4a', '.flac'}
+    ALLOWED_AUDIO_EXTS = {'.wav', '.mp3', '.ogg', '.m4a', '.flac', '.mp4', '.mkv', '.webm', '.avi'}
     if safe_ext not in ALLOWED_AUDIO_EXTS:
         raise HTTPException(status_code=400, detail="Unsupported audio format")
     safe_filename = f"{uuid.uuid4().hex}{safe_ext}"

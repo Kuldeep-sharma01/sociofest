@@ -12,6 +12,7 @@ import AssignmentSubmission from "../models/AssignmentSubmission.js";
 import QuizSubmission from "../models/QuizSubmission.js";
 import { deleteMediaDocs } from "../utils/mediaHelper.js";
 import { ok, created, badRequest, notFound, forbidden } from "../utils/index.js";
+import { ROLES } from "../utils/rbac.js";
 
 const sanitizeSubjects = (subjects) => {
   if (!Array.isArray(subjects)) return [];
@@ -98,7 +99,7 @@ export const getAllDepartments = async (req, res, next) => {
   try {
     const departments = await Department.find()
       .sort({ name: 1 })
-      .populate("hod", "name email role");
+      .populate("hod", "name email role profilePicture _id");
     ok(res, departments, "Departments retrieved successfully.");
   } catch (error) {
     next(error);
@@ -114,7 +115,7 @@ export const getDepartmentById = async (req, res, next) => {
   try {
     const department = await Department.findById(req.params.id).populate(
       "hod",
-      "name email role",
+      "name email role profilePicture _id",
     );
 
     if (!department)
@@ -138,6 +139,7 @@ export const updateDepartment = async (req, res, next) => {
       "description",
       "totalSemesters",
       "isActive",
+      "hod",
     ];
 
     const updates = {};
@@ -146,6 +148,42 @@ export const updateDepartment = async (req, res, next) => {
         updates[field] = req.body[field];
       }
     });
+
+    const targetDept = await Department.findById(req.params.id);
+    if (!targetDept) return notFound(res, "Department not found");
+
+    if (updates.hod !== undefined) {
+      const oldHodId = targetDept.hod;
+      const newHodId = updates.hod === "null" || updates.hod === "" ? null : updates.hod;
+
+      // 1. Cleanup Old HOD (Demote to Teacher)
+      if (oldHodId && String(oldHodId) !== String(newHodId)) {
+        const oldHod = await User.findById(oldHodId);
+        // Only demote if they are currently an HOD (Don't touch Admins)
+        if (oldHod && oldHod.role?.toLowerCase() === ROLES.HOD.toLowerCase()) {
+          oldHod.role = "Teacher";
+          await oldHod.save();
+          
+          // Cleanup HOD profile record if it exists
+          try {
+            const HOD_MODEL = mongoose.model("HOD");
+            if (HOD_MODEL) await HOD_MODEL.deleteOne({ userId: oldHod._id });
+          } catch (e) {}
+        }
+      }
+
+      // 2. Setup New HOD (Promote Teacher to HOD)
+      if (newHodId) {
+        const newHod = await User.findById(newHodId);
+        if (newHod && newHod.role?.toLowerCase() === ROLES.TEACHER.toLowerCase()) {
+          newHod.role = "HOD";
+          await newHod.save();
+        }
+        updates.hod = newHodId;
+      } else {
+        updates.hod = null;
+      }
+    }
 
     if (updates.name) updates.name = String(updates.name).trim();
     if (updates.code) updates.code = String(updates.code).trim().toUpperCase();
@@ -205,7 +243,7 @@ export const assignHod = async (req, res, next) => {
       return notFound(res, "Department not found");
 
     const hod = await User.findById(hodId);
-    if (!hod || hod.role !== "HOD") {
+    if (!hod || hod.role?.toLowerCase() !== ROLES.HOD.toLowerCase()) {
       return badRequest(res, "User not found or does not have HOD role");
     }
     

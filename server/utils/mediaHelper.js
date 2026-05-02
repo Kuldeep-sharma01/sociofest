@@ -19,22 +19,34 @@ const cleanupProcesses = () => {
   for (const cp of activeProcesses) {
     try {
       cp.kill("SIGKILL");
-    } catch (e) {}
+    } catch (e) { }
   }
 };
 process.on("SIGTERM", cleanupProcesses);
 process.on("SIGINT", cleanupProcesses);
 
+const getFfmpegConfigPath = () => path.join(process.cwd(), "config", "ffmpegConfig.json");
+
 let dynamicConfig = {};
-try {
-  const data = fsSync.readFileSync(
-    path.join(process.cwd(), "ffmpeg_config.json"),
-    "utf-8",
-  );
-  dynamicConfig = JSON.parse(data);
-} catch (e) {}
+const loadDynamicConfig = () => {
+  try {
+    const data = fsSync.readFileSync(getFfmpegConfigPath(), "utf-8");
+    dynamicConfig = JSON.parse(data);
+  } catch (e) {
+    // Fallback to legacy path if new path doesn't exist yet
+    try {
+      const legacyData = fsSync.readFileSync(path.join(process.cwd(), "ffmpeg_config.json"), "utf-8");
+      dynamicConfig = JSON.parse(legacyData);
+    } catch (err) { }
+  }
+};
+
+// Initial load
+loadDynamicConfig();
 
 export const getFfmpegConfig = () => {
+  // Reload to ensure we have the latest settings from Admin Dashboard without restart
+  loadDynamicConfig();
   return {
     maxBuffer:
       dynamicConfig.maxBuffer ||
@@ -56,7 +68,7 @@ export const getFfmpegConfig = () => {
 export const updateFfmpegConfig = async (newConfig) => {
   dynamicConfig = { ...dynamicConfig, ...newConfig };
   await fs.writeFile(
-    path.join(process.cwd(), "ffmpeg_config.json"),
+    getFfmpegConfigPath(),
     JSON.stringify(dynamicConfig, null, 2),
   );
 };
@@ -114,7 +126,7 @@ export const processUpload = async (file, folderName = "") => {
   // Content-based magic number verification
   const isSafe = await verifyFileType(file.path, file.mimetype);
   if (!isSafe) {
-    await fs.unlink(file.path).catch(() => {});
+    await fs.unlink(file.path).catch(() => { });
     throw new Error(
       "Security Error: File content does not match declared type.",
     );
@@ -150,11 +162,11 @@ export const processUpload = async (file, folderName = "") => {
     // Physical Verification: Ensure the file wasn't deleted from the server manually or by cleanup script
     try {
       await fs.access(path.resolve(process.cwd(), existingMedia.path));
-      await fs.unlink(file.path).catch(() => {});
+      await fs.unlink(file.path).catch(() => { });
       return existingMedia;
     } catch (diskErr) {
       // File is physically missing! Delete the orphaned DB record and process the new upload.
-      await Media.findByIdAndDelete(existingMedia._id).catch(() => {});
+      await Media.findByIdAndDelete(existingMedia._id).catch(() => { });
     }
   }
 
@@ -175,7 +187,7 @@ export const processUpload = async (file, folderName = "") => {
     ".dll",
   ];
   if (dangerousExts.includes(extension.toLowerCase())) {
-    await fs.unlink(file.path).catch(() => {});
+    await fs.unlink(file.path).catch(() => { });
     throw new Error(
       "Security Error: Uploading this file type is strictly prohibited.",
     );
@@ -208,7 +220,7 @@ export const processUpload = async (file, folderName = "") => {
   const baseDir = folderName
     ? path.join("uploads", folderName)
     : "uploads";
-  await fs.mkdir(baseDir, { recursive: true }).catch(() => {});
+  await fs.mkdir(baseDir, { recursive: true }).catch(() => { });
   const newPath = path.join(baseDir, newFilename);
 
   // Move the file safely (handles cross-device EXDEV errors common in Dropbox/Docker)
@@ -217,7 +229,7 @@ export const processUpload = async (file, folderName = "") => {
   } catch (err) {
     if (err.code === "EXDEV") {
       await fs.copyFile(file.path, newPath);
-      await fs.unlink(file.path).catch(() => {});
+      await fs.unlink(file.path).catch(() => { });
     } else throw err;
   }
 
@@ -354,7 +366,7 @@ export const processUpload = async (file, folderName = "") => {
           path.join(baseDir, `${baseName}_manifest.json`),
           JSON.stringify(manifest),
         );
-        logger.info(`Successfully scanned/extracted tracks for ${newPath}`);  
+        logger.info(`Successfully scanned/extracted tracks for ${newPath}`);
       } catch (err) {
         logger.error("[FFPROBE] Metadata extraction failed, skipping to optimization phase", { error: err.message, file: newPath });
         await fs
@@ -362,7 +374,7 @@ export const processUpload = async (file, folderName = "") => {
             path.join(baseDir, `${baseName}_manifest.json`),
             JSON.stringify({ subtitles: [], audioTracks: [] }),
           )
-          .catch(() => {});
+          .catch(() => { });
       }
 
       // --- PHASE 2: THUMBNAIL GENERATION ---
@@ -403,7 +415,7 @@ export const processUpload = async (file, folderName = "") => {
         if (config.enableHls) {
           console.log(`[FFMPEG] Generating HLS Chunks for ${baseName}...`);
           const hlsDir = path.join(baseDir, `${baseName}_hls`);
-          await fs.mkdir(hlsDir, { recursive: true }).catch(() => {});
+          await fs.mkdir(hlsDir, { recursive: true }).catch(() => { });
           const hlsPlaylistPath = path.join(hlsDir, "master.m3u8");
 
           try {
@@ -414,8 +426,8 @@ export const processUpload = async (file, folderName = "") => {
               [
                 "-v", "error", "-y", "-i", newPath, "-map", "0:v:0", "-map", "0:a:0?",
                 "-c", "copy", "-f", "hls", "-hls_time", "4", "-hls_playlist_type", "vod",
-                "-hls_segment_type", "fmp4", "-strict", "experimental",
-                "-hls_segment_filename", `${hlsDir}/chunk_%03d.m4s`, hlsPlaylistPath
+                "-hls_segment_type", "mpegts",
+                "-hls_segment_filename", `${hlsDir}/chunk_%03d.ts`, hlsPlaylistPath
               ],
               { timeout: config.timeout, maxBuffer: config.maxBuffer },
             );
@@ -426,8 +438,8 @@ export const processUpload = async (file, folderName = "") => {
                 "-v", "error", "-y", "-i", newPath, "-map", "0:v:0", "-map", "0:a:0?",
                 "-c:v", "libx264", "-preset", safePreset, "-crf", String(safeCrf), "-pix_fmt", "yuv420p",
                 "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-f", "hls", "-hls_time", "4",
-                "-hls_playlist_type", "vod", "-hls_segment_type", "fmp4",
-                "-hls_segment_filename", `${hlsDir}/chunk_%03d.m4s`, hlsPlaylistPath
+                "-hls_playlist_type", "vod", "-hls_segment_type", "mpegts",
+                "-hls_segment_filename", `${hlsDir}/chunk_%03d.ts`, hlsPlaylistPath
               ],
               { timeout: config.timeout, maxBuffer: config.maxBuffer },
             );
@@ -470,75 +482,96 @@ export const processUpload = async (file, folderName = "") => {
         );
 
         // --- NEW FEATURE: GENERATE MULTIPLE RESOLUTIONS ---
-        console.log(
-          `[FFMPEG] Generating multiple resolutions for ${baseName}...`,
-        );
-        const targetHeights = [1080, 720, 480, 360];
-        let currentManifest = {
-          subtitles: [],
-          audioTracks: [],
-          resolutions: [],
-        };
-
-        try {
-          const manifestContent = await fs.readFile(
-            path.join(baseDir, `${baseName}_manifest.json`),
-            "utf-8",
+        // Only generate multiple resolutions if HLS/Adaptive streaming is enabled to save massive CPU
+        if (config.enableHls) {
+          console.log(
+            `[FFMPEG] Generating multiple resolutions for ${baseName}...`,
           );
-          currentManifest = {
-            ...currentManifest,
-            ...JSON.parse(manifestContent),
+          const targetHeights = [1080, 720, 480, 360];
+          let currentManifest = {
+            subtitles: [],
+            audioTracks: [],
+            resolutions: [],
           };
-        } catch (e) {}
 
-        // Add the master optimized fallback file as the primary resolution
-        currentManifest.resolutions = currentManifest.resolutions || [];
-        currentManifest.resolutions.push({
-          height: sourceHeight,
-          label: `${sourceHeight}p (Original)`,
-          url: `/${newPath.replace(/\\/g, "/")}`,
-        });
-
-        // Generate lower resolutions based on source height
-        for (const h of targetHeights) {
-          if (sourceHeight > h + 50) {
-            // Only downscale if original is noticeably larger
-            const resMp4Path = path.join(
-              baseDir,
-              `${baseName}_${h}p.mp4`,
+          try {
+            const manifestContent = await fs.readFile(
+              path.join(baseDir, `${baseName}_manifest.json`),
+              "utf-8",
             );
-            console.log(`[FFMPEG] Generating ${h}p version...`);
-            try {
-              await trackedExecFileAsync(
-                "ffmpeg",
-                [
-                  "-v", "error", "-y", "-i", newPath, "-vf", `scale=-2:${h}`,
-                  "-c:v", "libx264", "-preset", safePreset, "-crf", String(safeCrf), "-pix_fmt", "yuv420p",
-                  "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", resMp4Path
-                ],
-                { timeout: config.timeout, maxBuffer: config.maxBuffer },
+            currentManifest = {
+              ...currentManifest,
+              ...JSON.parse(manifestContent),
+            };
+          } catch (e) { }
+
+          // Add the master optimized fallback file as the primary resolution
+          currentManifest.resolutions = currentManifest.resolutions || [];
+          currentManifest.resolutions.push({
+            height: sourceHeight,
+            label: `${sourceHeight}p (Original)`,
+            url: `/${newPath.replace(/\\/g, "/")}`,
+          });
+
+          // Generate lower resolutions based on source height
+          for (const h of targetHeights) {
+            if (sourceHeight > h + 50) {
+              // Only downscale if original is noticeably larger
+              const resMp4Path = path.join(
+                baseDir,
+                `${baseName}_${h}p.mp4`,
               );
-              currentManifest.resolutions.push({
-                height: h,
-                label: `${h}p`,
-                url: `/${resMp4Path.replace(/\\/g, "/")}`,
-              });
-            } catch (resErr) {
-              console.error(
-                `[FFMPEG] Failed to generate ${h}p version:`,
-                resErr.message,
-              );
+              console.log(`[FFMPEG] Generating ${h}p version...`);
+              try {
+                await trackedExecFileAsync(
+                  "ffmpeg",
+                  [
+                    "-v", "error", "-y", "-i", newPath, "-vf", `scale=-2:${h}`,
+                    "-c:v", "libx264", "-preset", safePreset, "-crf", String(safeCrf), "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", resMp4Path
+                  ],
+                  { timeout: config.timeout, maxBuffer: config.maxBuffer },
+                );
+                currentManifest.resolutions.push({
+                  height: h,
+                  label: `${h}p`,
+                  url: `/${resMp4Path.replace(/\\/g, "/")}`,
+                });
+              } catch (resErr) {
+                console.error(
+                  `[FFMPEG] Failed to generate ${h}p version:`,
+                  resErr.message,
+                );
+              }
             }
           }
-        }
 
-        // Sort resolutions from highest to lowest
-        currentManifest.resolutions.sort((a, b) => b.height - a.height);
-        await fs.writeFile(
-          path.join(baseDir, `${baseName}_manifest.json`),
-          JSON.stringify(currentManifest),
-        );
-        console.log(`[FFMPEG] Resolution generation complete for ${baseName}!`);
+          // Sort resolutions from highest to lowest
+          currentManifest.resolutions.sort((a, b) => b.height - a.height);
+          await fs.writeFile(
+            path.join(baseDir, `${baseName}_manifest.json`),
+            JSON.stringify(currentManifest),
+          );
+          console.log(`[FFMPEG] Resolution generation complete for ${baseName}!`);
+        } else {
+          // Minimal manifest for simple MP4
+          let currentManifest = { subtitles: [], audioTracks: [], resolutions: [] };
+          try {
+            const manifestContent = await fs.readFile(path.join(baseDir, `${baseName}_manifest.json`), "utf-8");
+            currentManifest = { ...currentManifest, ...JSON.parse(manifestContent) };
+          } catch (e) { }
+
+          currentManifest.resolutions = [{
+            height: sourceHeight,
+            label: `${sourceHeight}p`,
+            url: `/${newPath.replace(/\\/g, "/")}`
+          }];
+
+          await fs.writeFile(
+            path.join(baseDir, `${baseName}_manifest.json`),
+            JSON.stringify(currentManifest),
+          );
+        }
       } catch (optErr) {
         console.error(
           `[FFMPEG] Optimization failed for ${baseName}:`,
@@ -655,7 +688,7 @@ export const deleteMediaDocs = async (mediaIds) => {
       if (!mediaDoc.isExternal && !mediaDoc.path.startsWith("http"))
         await fs
           .unlink(path.resolve(process.cwd(), mediaDoc.path))
-          .catch(() => {});
+          .catch(() => { });
       await mediaDoc.deleteOne();
     }
   }

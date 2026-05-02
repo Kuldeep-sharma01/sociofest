@@ -1,0 +1,59 @@
+{
+  "model_storage": {
+    "enabled": true,
+    "large_file_threshold_gb": 3,
+    "backends": [
+      {
+        "type": "local",
+        "name": "Local Cache (Native)",
+        "enabled": true,
+        "priority": 1,
+        "config": {
+          "path": "stable_diffusion_models"
+        }
+      },
+      {
+        "type": "google_drive",
+        "name": "Google Drive Backup",
+        "enabled": false,
+        "priority": 2,
+        "config": {
+          "credentials_file": ".env.secrets/google-drive-credentials.json",
+          "folder_id": null
+        }
+      },
+      {
+        "type": "aws_s3",
+        "name": "AWS S3 Backup",
+        "enabled": false,
+        "priority": 3,
+        "config": {
+          "bucket": "sociofest-models",
+          "region": "us-east-1",
+          "access_key": null,
+          "secret_key": null
+        }
+      },
+      {
+        "type": "azure_blob",
+        "name": "Azure Blob Storage",
+        "enabled": false,
+        "priority": 4,
+        "config": {
+          "account_name": null,
+          "account_key": null,
+          "container": "models"
+        }
+      },
+      {
+        "type": "huggingface",
+        "name": "HuggingFace Hub (Fallback)",
+        "enabled": true,
+        "priority": 99,
+        "config": {}
+      }
+    ],
+    "fallback_strategy": "sequential",
+    "cache_location": "stable_diffusion_models"
+  }
+}

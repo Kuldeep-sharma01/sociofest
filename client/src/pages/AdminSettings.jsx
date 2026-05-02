@@ -130,6 +130,12 @@ const ALLOWED_SERVICE_CONTROL_KEYS = new Set([
   "staffAttendanceEnabled",
   "registrationRequiresWifi",
   "allowStaffPublicSignup",
+  "compilerEnabled",
+  "marketplaceEnabled",
+  "chatEnabled",
+  "quizEnabled",
+  "attendanceEnabled",
+  "notificationsEnabled",
 ]);
 
   const handleChange = (e) => {
@@ -292,6 +298,12 @@ const ALLOWED_SERVICE_CONTROL_KEYS = new Set([
               ["staffAttendanceEnabled", "Enable Staff (Teacher/HOD) Attendance"],
               ["registrationRequiresWifi", "Enforce Campus WiFi Rule for Registration"],
               ["allowStaffPublicSignup", "Allow Public Staff Signups (Teachers/HODs)"],
+              ["compilerEnabled", "Enable Code Compiler Hub"],
+              ["marketplaceEnabled", "Enable Marketplace Hub"],
+              ["chatEnabled", "Enable Real-time Chat Hub"],
+              ["quizEnabled", "Enable Quiz & Assessment Hub"],
+              ["attendanceEnabled", "Enable Attendance Management Hub"],
+              ["notificationsEnabled", "Enable Global Notifications Hub"],
             ].map(([key, label]) => (
               <label key={key} className="flex items-center justify-between border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2">
                 <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>

@@ -8,13 +8,13 @@ import { ok, created, notFound, forbidden, badRequest, serverError } from "../ut
 
 export const getProducts = async (req, res, next) => {
   try {
-    const page  = Math.max(1, parseInt(req.query.page) || 1);
+    const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(50, parseInt(req.query.limit) || 20);
-    const skip  = (page - 1) * limit;
+    const skip = (page - 1) * limit;
     const filter = {};
 
     if (req.query.category) filter.category = req.query.category;
-    if (req.query.status)   filter.status   = req.query.status;
+    if (req.query.status) filter.status = req.query.status;
 
     const [products, total] = await Promise.all([
       Product.find(filter)
@@ -37,7 +37,7 @@ export const getProductById = async (req, res, next) => {
     const product = await Product.findById(req.params.id)
       .populate("seller", "name profilePicture role department")
       .populate({ path: "images", model: "Media" });
-      
+
     if (!product) return notFound(res, "Product not found.");
     ok(res, product, "Product retrieved successfully.");
   } catch (error) {
@@ -57,7 +57,7 @@ export const createProduct = async (req, res, next) => {
     if (!title || String(title).trim().length < 2) {
       return badRequest(res, 'Title must be at least 2 characters');
     }
-    
+
     // Sanitize text fields
     const safeTitle = String(title).trim().slice(0, 200);
     const safeLocation = location ? String(location).trim().slice(0, 200) : '';
@@ -95,10 +95,8 @@ export const createProduct = async (req, res, next) => {
 export const updateProduct = async (req, res, next) => {
   try {
     const { title, price, category, condition, location, status, description } = req.body;
-    console.log("Update Product Request Body:", req.body);
     const deliveryOptions = normalizeArr(req.body.deliveryOptions);
     const product = await Product.findById(req.params.id);
-console.log("Found Product:", product);
     if (!product) return notFound(res, "Product not found.");
     if (product.seller.toString() !== req.user._id.toString() && req.user.role !== "Admin") {
       return forbidden(res, "Not authorized to update this product.");
@@ -168,7 +166,7 @@ export const deleteProduct = async (req, res, next) => {
     const product = await Product.findById(req.params.id);
     if (!product) return notFound(res, "Product not found.");
     if (product.seller.toString() !== req.user._id.toString() && req.user.role !== "Admin") return forbidden(res, "Not authorized to delete this product.");
-    
+
     if (product.images && product.images.length > 0) {
       await deleteMediaDocs(product.images);
     }

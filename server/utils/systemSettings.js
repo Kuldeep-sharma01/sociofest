@@ -147,6 +147,13 @@ export const getPublicSystemSettings = async () => {
       mediaPlayerFallbackEnabled: Boolean(settings.serviceControls?.mediaPlayerFallbackEnabled),
       documentViewerFallbackEnabled: Boolean(settings.serviceControls?.documentViewerFallbackEnabled),
       mobileSafeModeEnabled: Boolean(settings.serviceControls?.mobileSafeModeEnabled),
+      compilerEnabled: Boolean(settings.serviceControls?.compilerEnabled),
+      marketplaceEnabled: Boolean(settings.serviceControls?.marketplaceEnabled),
+      chatEnabled: Boolean(settings.serviceControls?.chatEnabled),
+      quizEnabled: Boolean(settings.serviceControls?.quizEnabled),
+      attendanceEnabled: Boolean(settings.serviceControls?.attendanceEnabled),
+      notificationsEnabled: Boolean(settings.serviceControls?.notificationsEnabled),
     },
+    navigationConfig: settings.navigationConfig || [],
   };
 };

@@ -102,7 +102,7 @@ export const updateFfmpegConfig = async (req, res) => {
 
 export const updateSystemSettings = async (req, res, next) => {
   try {
-    const { maintenanceMode, registrationEnabled, emailSettings, serviceControls } = req.body;
+    const { maintenanceMode, registrationEnabled, emailSettings, serviceControls, navigationConfig } = req.body;
 
     // Data Validation
     if (maintenanceMode !== undefined && typeof maintenanceMode !== "boolean") {
@@ -165,6 +165,7 @@ export const updateSystemSettings = async (req, res, next) => {
         ...(currentSettings.serviceControls || defaultSettings.serviceControls),
         ...(serviceControls || {}),
       },
+      ...(navigationConfig && { navigationConfig }),
     };
     await writeSettings(newSettings);
 

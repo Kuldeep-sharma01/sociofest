@@ -17,6 +17,272 @@
     "wifiEnforcementEnabled": true,
     "mediaPlayerFallbackEnabled": true,
     "documentViewerFallbackEnabled": true,
-    "mobileSafeModeEnabled": true
-  }
+    "mobileSafeModeEnabled": true,
+    "compilerEnabled": true,
+    "marketplaceEnabled": true,
+    "chatEnabled": true,
+    "quizEnabled": true,
+    "attendanceEnabled": true,
+    "notificationsEnabled": true
+  },
+  "aiModelConfig": {
+    "chat": [
+      {
+        "provider": "deepseek",
+        "model": "deepseek-chat",
+        "enabled": true,
+        "timeoutMs": 20000
+      },
+      {
+        "provider": "openrouter",
+        "model": "meta-llama/llama-3-8b-instruct:free",
+        "enabled": true,
+        "timeoutMs": 25000
+      }
+    ],
+    "media": [
+      {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "enabled": true,
+        "timeoutMs": 30000
+      }
+    ],
+    "apiKeys": {
+      "openai": "",
+      "deepseek": "",
+      "openrouter": "",
+      "gemini": ""
+    }
+  },
+  "cloudStorage": {
+    "activeProvider": "local",
+    "maxUploadSizeMB": 100,
+    "allowedFileTypes": [
+      "image/*",
+      "video/*",
+      "audio/*",
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.*"
+    ],
+    "local": {
+      "enabled": true,
+      "uploadDir": "uploads"
+    },
+    "s3": {
+      "enabled": false,
+      "bucket": "",
+      "region": "",
+      "accessKeyId": "",
+      "secretAccessKey": ""
+    },
+    "cloudinary": {
+      "enabled": false,
+      "cloudName": "",
+      "apiKey": "",
+      "apiSecret": ""
+    },
+    "googleDrive": {
+      "enabled": false,
+      "folderId": "",
+      "serviceAccountKey": ""
+    }
+  },
+  "rateLimits": {
+    "global": {
+      "windowMs": 900000,
+      "max": 300
+    },
+    "auth": {
+      "windowMs": 900000,
+      "max": 20
+    },
+    "ai": {
+      "windowMs": 60000,
+      "max": 10
+    },
+    "upload": {
+      "windowMs": 60000,
+      "max": 30
+    },
+    "messages": {
+      "windowMs": 60000,
+      "max": 60
+    },
+    "compiler": {
+      "windowMs": 900000,
+      "max": 50
+    },
+    "admin": {
+      "windowMs": 900000,
+      "max": 30
+    },
+    "export": {
+      "windowMs": 900000,
+      "max": 5
+    }
+  },
+  "accessControl": {
+    "allowedRoles": [
+      "Student",
+      "Teacher",
+      "HOD",
+      "Admin",
+      "Seller"
+    ],
+    "defaultNewUserRole": "Student",
+    "requireApproval": true,
+    "maxLoginAttempts": 5,
+    "lockoutDurationMinutes": 30,
+    "sessionTimeoutMinutes": 1440,
+    "allowGoogleAuth": true,
+    "corsAllowedOrigins": []
+  },
+  "navigationConfig": [
+    {
+      "path": "/",
+      "label": "Home Feed",
+      "visible": true,
+      "order": 1
+    },
+    {
+      "path": "/chat",
+      "label": "Chat",
+      "visible": true,
+      "order": 2
+    },
+    {
+      "path": "/dashboard",
+      "label": "Dashboard",
+      "visible": true,
+      "order": 3
+    },
+    {
+      "path": "/ai-hub",
+      "label": "AI Hub",
+      "visible": true,
+      "order": 4
+    },
+    {
+      "path": "/activities",
+      "label": "Activities",
+      "visible": true,
+      "order": 5
+    },
+    {
+      "path": "/marketplace",
+      "label": "Marketplace",
+      "visible": true,
+      "order": 6
+    },
+    {
+      "path": "/profile",
+      "label": "Public Profile",
+      "visible": true,
+      "order": 7
+    },
+    {
+      "path": "/study-hub",
+      "label": "Study Hub",
+      "visible": true,
+      "order": 8
+    },
+    {
+      "path": "/dashboard/mark-attendance",
+      "label": "Mark Attendance",
+      "visible": true,
+      "order": 9
+    },
+    {
+      "path": "/teacher/quiz-editor",
+      "label": "Quiz Editor",
+      "visible": true,
+      "order": 10
+    },
+    {
+      "path": "/notice-board",
+      "label": "Notice Board",
+      "visible": true,
+      "order": 11
+    },
+    {
+      "path": "/ai-gallery",
+      "label": "Gallery",
+      "visible": true,
+      "order": 12
+    },
+    {
+      "path": "/compiler",
+      "label": "Compiler",
+      "visible": true,
+      "order": 13
+    },
+    {
+      "path": "/attendance",
+      "label": "Attendance",
+      "visible": true,
+      "order": 14
+    },
+    {
+      "path": "/dashboard/register-face",
+      "label": "Face Setup",
+      "visible": true,
+      "order": 15
+    },
+    {
+      "path": "/dashboard/curriculum",
+      "label": "Curriculum",
+      "visible": true,
+      "order": 16
+    },
+    {
+      "path": "/user-approvals",
+      "label": "Approvals",
+      "visible": true,
+      "order": 17
+    },
+    {
+      "path": "/admin/hod-management",
+      "label": "HOD Mgmt",
+      "visible": true,
+      "order": 18
+    },
+    {
+      "path": "/admin/settings",
+      "label": "System Settings",
+      "visible": true,
+      "order": 19
+    },
+    {
+      "path": "/dashboard/admin/wifi-config",
+      "label": "WiFi Config",
+      "visible": true,
+      "order": 20
+    },
+    {
+      "path": "/dashboard/analytics",
+      "label": "Analytics",
+      "visible": true,
+      "order": 21
+    },
+    {
+      "path": "/dashboard/teachers",
+      "label": "Teachers",
+      "visible": true,
+      "order": 22
+    },
+    {
+      "path": "/monetization",
+      "label": "Monetization",
+      "visible": true,
+      "order": 23
+    },
+    {
+      "path": "/dashboard/dropout-predict",
+      "label": "Dropout AI",
+      "visible": true,
+      "order": 24
+    }
+  ]
 }

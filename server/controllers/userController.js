@@ -32,7 +32,7 @@ import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 import { sendEmail } from "../utils/emailUtils.js";
-import { VALID_ROLES } from "../utils/rbac.js";
+import { ROLES, VALID_ROLES } from "../utils/rbac.js";
 
 // ── Rate limiting for email OTP resend (prevents spam) ────────────────────────
 const resendEmailOtpAttempts = new Map();
@@ -172,7 +172,10 @@ export const clearFaceRegistration = async (req, res) => {
     if (!user) return notFound(res);
     
     // Authorization check: Self or Admin
-    if (req.user._id.toString() !== user._id.toString() && req.user.role !== 'Admin') {
+    const isSelf = req.user._id.toString() === user._id.toString();
+    const isAdmin = req.user.role?.toLowerCase() === ROLES.ADMIN.toLowerCase();
+    
+    if (!isSelf && !isAdmin) {
       return forbidden(res, "Not authorized to clear this user's face data");
     }
 
@@ -362,9 +365,9 @@ export const updateUser = async (req, res) => {
     if (!user) return notFound(res);
 
     const isSelf = req.user._id.toString() === user._id.toString();
-    const isAdmin = req.user.role === "Admin";
-    const isHOD = req.user.role === "HOD" && String(user.department) === String(req.user.department);
-    const isTeacherOfStudent = req.user.role === "Teacher" && user.role === "Student" && String(user.department) === String(req.user.department);
+    const isAdmin = req.user.role?.toLowerCase() === ROLES.ADMIN.toLowerCase();
+    const isHOD = req.user.role?.toLowerCase() === ROLES.HOD.toLowerCase() && String(user.department) === String(req.user.department);
+    const isTeacherOfStudent = req.user.role?.toLowerCase() === ROLES.TEACHER.toLowerCase() && user.role === "Student" && String(user.department) === String(req.user.department);
 
     // 1. Authorization Check
     if (!isSelf && !isAdmin && !isHOD && !isTeacherOfStudent) {
@@ -438,7 +441,7 @@ export const changePassword = async (req, res) => {
 
     const isAdminResetting =
       req.user._id.toString() !== user._id.toString() &&
-      req.user.role === "Admin";
+      req.user.role?.toLowerCase() === ROLES.ADMIN.toLowerCase();
     if (!isAdminResetting && req.user._id.toString() !== user._id.toString()) {
       return forbidden(res, "Not authorized to change password.");
     }
@@ -472,19 +475,30 @@ export const changePassword = async (req, res) => {
  * @access Private (Admin / HOD)
  */
 export const deleteUser = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
-    const user = await User.findById(req.params.id);
-    if (!user) return notFound(res, "User not found.");
+    const user = await User.findById(req.params.id).session(session);
+    if (!user) {
+      await session.abortTransaction();
+      session.endSession();
+      return notFound(res, "User not found.");
+    }
 
-    if (!["Admin", "HOD"].includes(req.user.role)) {
+    const currentUserRole = req.user.role?.toLowerCase();
+    if (currentUserRole !== ROLES.ADMIN.toLowerCase() && currentUserRole !== ROLES.HOD.toLowerCase()) {
+      await session.abortTransaction();
+      session.endSession();
       return forbidden(res, "Not authorized to delete user.");
     }
 
     // ✅ HOD can only delete users in their own department
     if (
-      req.user.role === "HOD" &&
+      req.user.role?.toLowerCase() === ROLES.HOD.toLowerCase() &&
       String(user.department) !== String(req.user.department)
     ) {
+      await session.abortTransaction();
+      session.endSession();
       return forbidden(
         res,
         "HODs can only delete users in their own department.",
@@ -494,103 +508,107 @@ export const deleteUser = async (req, res) => {
     const userId = user._id;
 
     // CASCADING DELETE FIX: Clean up orphaned Posts, Comments, and Messages
-    await Post.deleteMany({ author: userId });
+    await Post.deleteMany({ author: userId }, { session });
     await Post.updateMany(
       {},
       { $pull: { comments: { user: userId }, reactions: { user: userId } } },
+      { session }
     );
 
-    await Comment.deleteMany({ author: userId });
-    await AssignmentSubmission.deleteMany({ student: userId });
-    await QuizSubmission.deleteMany({ student: userId });
+    await Comment.deleteMany({ author: userId }, { session });
+    await AssignmentSubmission.deleteMany({ student: userId }, { session });
+    await QuizSubmission.deleteMany({ student: userId }, { session });
     
     // ✅ NEW: Clean up Attendance and Role Profiles
-    const Attendance = mongoose.model("Attendance");
-    await Attendance.deleteMany({ student: userId });
-    await Student.deleteMany({ userId });
-    await Teacher.deleteMany({ userId });
-    await HOD.deleteMany({ userId });
-    await Seller.deleteMany({ userId });
+    if (mongoose.models.Attendance) {
+      await mongoose.models.Attendance.deleteMany({ student: userId }, { session });
+    }
+    await Student.deleteMany({ userId }, { session });
+    await Teacher.deleteMany({ userId }, { session });
+    await HOD.deleteMany({ userId }, { session });
+    await Seller.deleteMany({ userId }, { session });
 
     await Message.deleteMany({
       $or: [{ sender: userId }, { receiver: userId }],
-    });
+    }, { session });
 
     // Prevent orphan 1-on-1 DMs and properly remove user from Groups
     await Conversation.deleteMany({
       isGroup: { $ne: true },
       participants: userId,
-    });
+    }, { session });
     await Conversation.updateMany(
       { isGroup: true },
       { $pull: { participants: userId, favorites: userId } },
+      { session }
     );
-    await mongoose.model("PushSubscription").deleteMany({ user: userId });
+    
+    if (mongoose.models.PushSubscription) {
+      await mongoose.models.PushSubscription.deleteMany({ user: userId }, { session });
+    }
 
-    await Student.deleteOne({ userId });
-    await Teacher.deleteOne({ userId });
-    await HOD.deleteOne({ userId });
-    await Seller.deleteOne({ userId });
-
-    const userAssignments = await Assignment.find({ author: userId });
+    const userAssignments = await Assignment.find({ author: userId }).session(session);
     const userAssignmentIds = userAssignments.map((a) => a._id);
     await AssignmentSubmission.deleteMany({
       assignment: { $in: userAssignmentIds },
-    });
+    }, { session });
 
-    const userQuizzes = await Quiz.find({ author: userId });
+    const userQuizzes = await Quiz.find({ author: userId }).session(session);
     const userQuizIds = userQuizzes.map((q) => q._id);
-    await QuizSubmission.deleteMany({ quiz: { $in: userQuizIds } });
+    await QuizSubmission.deleteMany({ quiz: { $in: userQuizIds } }, { session });
 
-    await Assignment.deleteMany({ author: userId });
-    await Quiz.deleteMany({ author: userId });
-    await Event.deleteMany({ author: userId });
+    await Assignment.deleteMany({ author: userId }, { session });
+    await Quiz.deleteMany({ author: userId }, { session });
+    await Event.deleteMany({ author: userId }, { session });
 
-    const Certificate = mongoose.model("Certificate");
-    if (Certificate) {
-      await Certificate.deleteMany({ user: userId });
+    if (mongoose.models.Certificate) {
+      await mongoose.models.Certificate.deleteMany({ user: userId }, { session });
     }
 
     // PURE MATERIAL CLEANSING: Since Posts, Messages, Assignments, and standalone files
     // all use Material, we extract all media from the user's Materials to wipe physical files.
-    const userMaterials = await Material.find({ author: userId });
+    const userMaterials = await Material.find({ author: userId }).session(session);
     let allUserMedia = [];
     for (const mat of userMaterials) {
       if (mat.media && mat.media.length > 0) allUserMedia.push(...mat.media);
     }
-    if (allUserMedia.length > 0) await deleteMediaDocs(allUserMedia);
+    // Note: deleteMediaDocs will be called AFTER transaction commit to ensure consistency
 
-    await Material.deleteMany({ author: userId });
+    await Material.deleteMany({ author: userId }, { session });
+
+    if (user.role === "HOD") {
+      await Department.findOneAndUpdate({ hod: userId }, { $set: { hod: null } }, { session });
+    }
+
+    await user.deleteOne({ session });
+    
+    await session.commitTransaction();
+    session.endSession();
+
+    // --- Post-Commit Cleanups (Physical Files) ---
+    // We do this after commit because unlinking is irreversible
+    if (allUserMedia.length > 0) {
+      deleteMediaDocs(allUserMedia).catch(e => logger.error("Background media cleanup failed", { error: e.message, userId }));
+    }
 
     if (user.profilePicture && !user.profilePicture.startsWith("http")) {
-      try {
-        await fs.unlink(
-          path.join(process.cwd(), user.profilePicture.replace(/^\/+/, "")),
-        );
-      } catch (e) {
-        if (e.code !== "ENOENT")
-          logger.error(`Failed to delete profile picture for user ${userId}`, { error: e.message, stack: e.stack, path: path.join(process.cwd(), user.profilePicture.replace(/^\/+/, "")) });
-      }
+      fs.unlink(path.join(process.cwd(), user.profilePicture.replace(/^\/+/, "")))
+        .catch(() => {}); // Silent catch for ENOENT or permission issues
     }
     if (user.banner && !user.banner.startsWith("http")) {
-      try {
-        await fs.unlink(
-          path.join(process.cwd(), user.banner.replace(/^\/+/, "")),
-        );
-      } catch (e) {
-        if (e.code !== "ENOENT")
-          logger.error(`Failed to delete banner for user ${userId}`, { error: e.message, stack: e.stack, path: path.join(process.cwd(), user.banner.replace(/^\/+/, "")) });
-      }
+      fs.unlink(path.join(process.cwd(), user.banner.replace(/^\/+/, "")))
+        .catch(() => {});
     }
 
-    await user.deleteOne();
     ok(res, null, "User deleted successfully.");
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     logger.error("Error deleting user", { error: error.message, stack: error.stack, userId: req.params.id });
     serverError(res);
   }
-
 };
+
 
 /**
  * @desc Update user role (Admin only)
@@ -609,7 +627,47 @@ export const updateUserRole = async (req, res) => {
     const user = await User.findById(req.params.id);
     if (!user) return notFound(res, "User not found.");
 
+    const oldRole = user.role;
     user.role = role;
+
+    // Profile lifecycle management
+    if (role) {
+      // 1. Delete irrelevant profiles (Only if NOT moving to Admin)
+      // Admins are "Super Users" and should retain their original profile data if it exists
+      if (role !== "Admin") {
+        if (role !== "HOD") {
+          await HOD.deleteOne({ userId: user._id });
+          await Department.updateMany({ hod: user._id }, { $set: { hod: null } });
+        }
+        if (role !== "Teacher" && role !== "HOD") {
+          await Teacher.deleteOne({ userId: user._id });
+        }
+        if (role !== "Student") {
+          await Student.deleteOne({ userId: user._id });
+        }
+        if (role !== "Seller") {
+          await Seller.deleteOne({ userId: user._id });
+        }
+      }
+
+      // 2. Ensure target profile exists
+      if (role === "HOD") {
+        const existing = await HOD.findOne({ userId: user._id });
+        if (!existing) await HOD.create({ userId: user._id, department: user.department });
+        const existingTeacher = await Teacher.findOne({ userId: user._id });
+        if (!existingTeacher) await Teacher.create({ userId: user._id, department: user.department });
+      } else if (role === "Teacher") {
+        const existing = await Teacher.findOne({ userId: user._id });
+        if (!existing) await Teacher.create({ userId: user._id, department: user.department });
+      } else if (role === "Student") {
+        const existing = await Student.findOne({ userId: user._id });
+        if (!existing) await Student.create({ userId: user._id, department: user.department });
+      } else if (role === "Seller") {
+        const existing = await Seller.findOne({ userId: user._id });
+        if (!existing) await Seller.create({ userId: user._id });
+      }
+    }
+
     await user.save();
 
     const io = req.app.get("io");
@@ -649,12 +707,13 @@ export const updateUserStatus = async (req, res) => {
     }
 
     const currentUser = req.user;
+    const currentUserRole = currentUser.role?.toLowerCase();
 
-    if (currentUser.role === "Student") {
+    if (currentUserRole === ROLES.STUDENT.toLowerCase()) {
       return forbidden(res, "Not authorized.");
     }
 
-    if (currentUser.role === "Teacher") {
+    if (currentUserRole === ROLES.TEACHER.toLowerCase()) {
       if (!currentUser.department) {
         return forbidden(res, "Your account does not have a department assigned. Please contact an Admin.");
       }
@@ -670,7 +729,7 @@ export const updateUserStatus = async (req, res) => {
       }
 
       if (
-        user.role === "Teacher" &&
+        user.role?.toLowerCase() === ROLES.TEACHER.toLowerCase() &&
         (status === "Blocked" || user.status === "Blocked")
       ) {
         return forbidden(
@@ -680,10 +739,11 @@ export const updateUserStatus = async (req, res) => {
       }
     }
 
-    if (currentUser.role === "HOD") {
+    if (currentUserRole === ROLES.HOD.toLowerCase()) {
+      const targetRole = user.role?.toLowerCase();
       if (
-        user.role === "Admin" ||
-        user.role === "HOD" ||
+        targetRole === ROLES.ADMIN.toLowerCase() ||
+        targetRole === ROLES.HOD.toLowerCase() ||
         String(user.department) !== String(currentUser.department)
       ) {
         return forbidden(
@@ -759,18 +819,19 @@ export const bulkUpdateStatus = async (req, res) => {
         return forbidden(res, "Not authorized.");
       }
 
-      if (currentUser.role === "Teacher") {
-        if (
-          !["Student", "Teacher"].includes(user.role) ||
-          String(user.department) !== String(currentUser.department)
-        ) {
+      if (currentUserRole === ROLES.TEACHER.toLowerCase()) {
+      const targetRole = user.role?.toLowerCase();
+      if (
+        ![ROLES.STUDENT.toLowerCase(), ROLES.TEACHER.toLowerCase()].includes(targetRole) ||
+        String(user.department) !== String(currentUser.department)
+      ) {
           return forbidden(
             res,
             "Teachers can only manage Students and Teachers in their department.",
           );
         }
 
-        if (user.role === "Teacher" && status === "Blocked") {
+        if (user.role?.toLowerCase() === ROLES.TEACHER.toLowerCase() && status === "Blocked") {
           return forbidden(res, "Teachers cannot block other teachers.");
         }
       }
@@ -1482,9 +1543,11 @@ export const updateUserProfile = async (req, res) => {
       user.role === "Student" &&
       String(user.department) === String(req.user.department);
 
+    const isAdmin = req.user.role === ROLES.ADMIN || String(req.user.role).toLowerCase() === "admin";
+    
     if (
       req.user._id.toString() !== user._id.toString() &&
-      req.user.role !== "Admin" &&
+      !isAdmin &&
       !isSameDepartmentHOD &&
       !isSameDepartmentTeacher
     ) {
@@ -1495,7 +1558,7 @@ export const updateUserProfile = async (req, res) => {
 
     const oldRole = user.role;
     // SECURITY FIX: Prevent IDOR/Mass Assignment Privilege Escalation
-    const newRole = req.user.role === "Admin" && role ? role : oldRole;
+    const newRole = (req.user.role?.toLowerCase() === ROLES.ADMIN.toLowerCase()) && role ? role : oldRole;
 
     // --- New Profile Fields Update ---
     if (bio !== undefined) user.bio = bio;
@@ -1524,7 +1587,7 @@ export const updateUserProfile = async (req, res) => {
       if (user.role === "Student") {
         await Student.findOneAndUpdate(
           { userId: user._id },
-          { $set: { rollNumber: Number(enrollmentNumber) } },
+          { $set: { rollNumber: enrollmentNumber } },
           { session }
         );
       }
@@ -1575,14 +1638,20 @@ export const updateUserProfile = async (req, res) => {
     }
     // ---------------------------------
 
-    // If role changes, delete old role-specific data
-    if (newRole !== oldRole) {
-      if (oldRole === "Student")
+    // Role-specific cleanup and data management
+    if (newRole !== "HOD") {
+      // If the user is no longer an HOD (or was never one), ensure they are not linked as HOD of any department
+      await Department.updateMany({ hod: user._id }, { $set: { hod: null } }, { session });
+      await HOD.deleteOne({ userId: user._id }).session(session);
+      
+      if (oldRole === "Student" && newRole !== "Student") {
         await Student.deleteOne({ userId: user._id }).session(session);
-      if (oldRole === "Teacher")
-        await Teacher.deleteOne({ userId: user._id }).session(session);
-      if (oldRole === "HOD")
-        await HOD.deleteOne({ userId: user._id }).session(session);
+      }
+    } else {
+      // newRole IS HOD
+      if (oldRole === "Student") {
+         await Student.deleteOne({ userId: user._id }).session(session);
+      }
     }
 
     // Update base user info
@@ -1594,9 +1663,22 @@ export const updateUserProfile = async (req, res) => {
       if (newRole === "HOD") {
         const existingDept = await Department.findOne({ name: department }).session(session);
         if (existingDept && existingDept.hod && String(existingDept.hod) !== String(user._id)) {
-          await session.abortTransaction();
-          session.endSession();
-          return badRequest(res, `The department '${department}' already has an HOD. You must remove the current HOD before assigning a new one.`);
+          if (req.body.replace) {
+            // Demote the current HOD of this department
+            const oldHodId = existingDept.hod;
+            await User.findByIdAndUpdate(oldHodId, { $set: { role: "Teacher" } }, { session });
+            await HOD.deleteOne({ userId: oldHodId }).session(session);
+            // Ensure the demoted HOD has a Teacher profile
+            await Teacher.findOneAndUpdate(
+              { userId: oldHodId },
+              { $setOnInsert: { userId: oldHodId, qualifications: "Demoted from HOD", experience: 0, subjects: [] } },
+              { upsert: true, session }
+            );
+          } else {
+            await session.abortTransaction();
+            session.endSession();
+            return badRequest(res, `The department '${department}' already has an HOD. You must use the replace option to assign a new one.`);
+          }
         }
         const dept = await Department.findOneAndUpdate(
           { name: department },

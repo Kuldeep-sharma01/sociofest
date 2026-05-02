@@ -106,7 +106,7 @@ def transcribe_audio():
         return jsonify({"error": "Empty filename"}), 400
 
     safe_ext = pathlib.Path(file.filename).suffix.lower()
-    ALLOWED_AUDIO_EXTS = {'.wav', '.mp3', '.ogg', '.m4a', '.flac'}
+    ALLOWED_AUDIO_EXTS = {'.wav', '.mp3', '.ogg', '.m4a', '.flac', '.mp4', '.mkv', '.webm', '.avi'}
     if safe_ext not in ALLOWED_AUDIO_EXTS:
         return jsonify({"error": "Unsupported audio format"}), 400
 
@@ -243,7 +243,7 @@ def clone_voice():
     text = text[:2000]
 
     safe_ext = pathlib.Path(speaker_wav.filename).suffix.lower()
-    ALLOWED_AUDIO_EXTS = {'.wav', '.mp3', '.ogg', '.m4a', '.flac'}
+    ALLOWED_AUDIO_EXTS = {'.wav', '.mp3', '.ogg', '.m4a', '.flac', '.mp4', '.mkv', '.webm', '.avi'}
     if safe_ext not in ALLOWED_AUDIO_EXTS:
         return jsonify({"error": "Unsupported audio format"}), 400
         

@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
-import Settings from "../models/Settings.js";
+import { readSystemSettings } from "../utils/systemSettings.js";
 
 let cachedSettings = null;
 let lastSettingsFetch = 0;
@@ -9,7 +9,7 @@ const SETTINGS_CACHE_TTL = 60000; // 1 minute cache
 const getSettings = async () => {
   const now = Date.now();
   if (!cachedSettings || now - lastSettingsFetch > SETTINGS_CACHE_TTL) {
-    cachedSettings = (await Settings.findOne().lean()) || {};
+    cachedSettings = await readSystemSettings();
     lastSettingsFetch = now;
   }
   return cachedSettings;

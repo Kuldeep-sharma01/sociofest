@@ -9,6 +9,7 @@ import Department from "../models/Department.js";
 import Subject from "../models/Subject.js";
 import QuizSubmission from "../models/QuizSubmission.js";
 import Notification from "../models/Notification.js";
+import { readSystemSettings } from "../utils/systemSettings.js";
 import { ok, created, badRequest, notFound, forbidden, unprocessableEntity, serverError } from '../utils/index.js';
 
 // Helper function to populate quiz attempts
@@ -135,6 +136,10 @@ export const flagQuizAttempt = async (req, res) => {
  */
 export const createQuiz = async (req, res) => {
   try {
+    const systemSettings = await readSystemSettings();
+    if (systemSettings.serviceControls?.quizEnabled === false) {
+      return forbidden(res, "Quiz features are currently disabled by admin.");
+    }
     const { title, subject, questions, startDate, department, shuffle } =
       req.body;
     if (!title || !subject || !questions || questions.length === 0) {
@@ -194,6 +199,10 @@ export const createQuiz = async (req, res) => {
  */
 export const getAllQuizzes = async (req, res) => {
   try {
+    const systemSettings = await readSystemSettings();
+    if (systemSettings.serviceControls?.quizEnabled === false) {
+       return ok(res, { quizzes: [], total: 0, page: 1, pages: 0, message: "Quiz features are currently disabled by admin." });
+    }
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
     const limit = Math.min(50, parseInt(req.query.limit) || 20);
     const skip  = (page - 1) * limit;
@@ -313,6 +322,10 @@ export const getQuizzesByTeacher = async (req, res) => {
  */
 export const submitQuiz = async (req, res) => {
   try {
+    const systemSettings = await readSystemSettings();
+    if (systemSettings.serviceControls?.quizEnabled === false) {
+       return forbidden(res, "Quiz submissions are currently disabled by admin.");
+    }
     const { answers } = req.body;
     const quiz = await Quiz.findById(req.params.id);
 

@@ -73,8 +73,9 @@ const AdminDashboard = ({ userId, isViewingOther, targetUser }) => {
       }
     };
 
-    if (activeUserId) fetchAdminData();
-  }, [activeUserId, refreshKey]);
+    if (activeUserId && authUser?.role === "Admin") fetchAdminData();
+    else setLoading(false);
+  }, [activeUserId, refreshKey, authUser?.role]);
 
   const handleUpdateProfile = async (payload) => {
     setUpdating(true);

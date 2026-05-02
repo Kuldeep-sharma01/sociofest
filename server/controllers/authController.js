@@ -71,9 +71,9 @@ const isStrongPassword = (password) => {
 // --- ROLE-SPECIFIC PROFILE HANDLERS ---
 
 const setupStudentProfile = async (user, data, deptId) => {
-  const rollNum = Number(data.rollNumber);
+  const rollNum = data.rollNumber ? String(data.rollNumber).trim() : null;
   if (rollNum) {
-    user.enrollmentNumber = String(rollNum);
+    user.enrollmentNumber = rollNum;
     await user.save({ validateBeforeSave: false });
   }
   
@@ -87,7 +87,7 @@ const setupStudentProfile = async (user, data, deptId) => {
 
   await Student.create([{
     userId: user._id,
-    rollNumber: rollNum || null,
+    rollNumber: rollNum,
     semester: Number(data.semester) || 1,
     subjects,
   }]);

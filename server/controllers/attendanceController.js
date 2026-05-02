@@ -112,6 +112,11 @@ export const verifyAndMarkAttendance = async (req, res) => {
     const { curriculum: curriculumId } = req.body;
     if (!curriculumId) return badRequest(res, "Curriculum ID required");
 
+    const systemSettings = await readSystemSettings();
+    if (systemSettings.serviceControls?.faceRecognitionEnabled === false) {
+      return forbidden(res, "Biometric face recognition is currently disabled by admin.");
+    }
+
     const userId = req.user._id;
     const pythonUrl = process.env.PYTHON_INTERNAL_URL || process.env.PYTHON_URL || "http://localhost:5001";
 

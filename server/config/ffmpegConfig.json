@@ -1,0 +1,7 @@
+{
+  "maxBuffer": 1073741824,
+  "preset": "ultrafast",
+  "crf": 28,
+  "timeout": 0,
+  "enableHls": false
+}

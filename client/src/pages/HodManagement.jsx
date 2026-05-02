@@ -6,12 +6,18 @@ import { Link } from "react-router-dom";
 import { Crown, Shield, Building, Loader2, Edit2, Plus, Trash2 } from "lucide-react";
 import Select from "react-select";
 import LoadingSkeleton from "@/components/ui/LoadingSkeleton";
+import { useSelector, useDispatch } from "react-redux";
+import { updateUser as updateAuthUser } from "@/redux/authSlice";
 import { useTheme } from "@/context/ThemeContext";
 import { getWrapperThemeClasses, getCardThemeClasses, getPrimaryButtonClasses } from "@/utils/themeUtils";
+import { AlertCircle, Info } from "lucide-react";
 
 const HodManagement = () => {
   const queryClient = useQueryClient();
+  const dispatch = useDispatch();
   const { appTheme, isDark } = useTheme();
+  const authUser = useSelector((state) => state.auth.user);
+  const isAdmin = authUser?.role === "Admin";
 
   const [selectedTeacher, setSelectedTeacher] = useState(null);
   const [targetDepartment, setTargetDepartment] = useState(null);
@@ -26,11 +32,15 @@ const HodManagement = () => {
   });
 
   const { data: teachers, isLoading: isLoadingTeachers } = useQuery({
-    queryKey: ["users", { role: "Teacher" }],
-    queryFn: () => getAllUsers({ role: "Teacher" }),
+    queryKey: ["users", { role: ["Teacher", "Admin"] }],
+    queryFn: () => getAllUsers({ role: ["Teacher", "Admin"] }),
     select: (data) => {
       const list = Array.isArray(data) ? data : data?.users || data?.data || [];
-      return list.map((t) => ({ value: t._id, label: `${t.name} (${t.email || 'No Email'})` }));
+      return list.map((t) => ({ 
+        value: t._id, 
+        label: `${t.name} (${t.email || 'No Email'}) [${t.role}]`,
+        role: t.role 
+      }));
     },
   });
 
@@ -40,10 +50,11 @@ const HodManagement = () => {
   });
 
   const { mutate: assignHod, isLoading: isAssigning } = useMutation({
-    mutationFn: ({ userId, departmentName }) => {
+    mutationFn: ({ userId, departmentName, replace }) => {
       const payload = {
         role: "HOD",
         department: departmentName,
+        replace: replace,
         hodData: {
             semesters: 8,
             tenure: 0,
@@ -52,15 +63,41 @@ const HodManagement = () => {
       };
       return updateUserProfile(userId, payload);
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       queryClient.invalidateQueries({ queryKey: ["departments"] });
+      
+      // If the updated user is the current logged-in user, refresh their local session
+      if (data?.user?._id === authUser?._id) {
+        dispatch(updateAuthUser(data.user));
+      }
+      
       setSelectedTeacher(null);
       setTargetDepartment(null);
       window.dispatchEvent(new CustomEvent("showToast", { detail: "HOD assigned successfully! 👑" }));
     },
     onError: (error) => {
       const errorMsg = error.response?.data?.message || "Failed to assign HOD.";
+      window.dispatchEvent(new CustomEvent("showToast", { detail: { message: errorMsg, variant: 'error' } }));
+    },
+  });
+
+  const { mutate: removeHod, isLoading: isRemovingHod } = useMutation({
+    mutationFn: (deptId) => {
+      return updateDept({ id: deptId, data: { hod: null } });
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["departments"] });
+      
+      // Note: removeHod now calls updateDepartment, which doesn't return the demoted user.
+      // However, the backend's cleanup logic might have changed the current user's role.
+      // We'll invalidate the user queries to ensure the UI eventually catches up.
+      
+      window.dispatchEvent(new CustomEvent("showToast", { detail: "HOD removed successfully! 🗑️" }));
+    },
+    onError: (error) => {
+      const errorMsg = error.response?.data?.message || "Failed to remove HOD.";
       window.dispatchEvent(new CustomEvent("showToast", { detail: { message: errorMsg, variant: 'error' } }));
     },
   });
@@ -111,10 +148,28 @@ const HodManagement = () => {
 
   const handleConfirmAssignment = () => {
     if (selectedTeacher && targetDepartment) {
-      assignHod({
-        userId: selectedTeacher.value,
-        departmentName: targetDepartment.name,
-      });
+      // If assigning an Admin as HOD, we don't want to change their role to "HOD"
+      // We just want to update the department's hod field.
+      if (selectedTeacher.role === "Admin") {
+        updateDept({
+          id: targetDepartment._id,
+          data: { hod: selectedTeacher.value }
+        });
+        setSelectedTeacher(null);
+        setTargetDepartment(null);
+      } else {
+        assignHod({
+          userId: selectedTeacher.value,
+          departmentName: targetDepartment.name,
+          replace: !!targetDepartment.hod,
+        });
+      }
+    }
+  };
+
+  const handleRemoveHod = (deptId, deptName) => {
+    if (window.confirm(`Are you sure you want to remove the HOD for ${deptName}? If they are not an Admin, they will be demoted to Teacher.`)) {
+      removeHod(deptId);
     }
   };
 
@@ -123,7 +178,23 @@ const HodManagement = () => {
   const safeDepartments = Array.isArray(departments) ? departments : departments?.departments || [];
   const safeHods = Array.isArray(hods) ? hods : hods?.users || [];
   const departmentsWithHods = safeDepartments.map(dept => {
-      const hod = safeHods.find(h => h.department?._id === dept._id);
+      // Robust detection: 
+      // 1. Check if dept.hod is a populated object with an _id
+      // 2. If not, check if dept.hod is a string (the ID itself)
+      // 3. Fallback to searching the safeHods list by comparing string versions of IDs
+      const hodId = dept.hod?._id || (typeof dept.hod === 'string' ? dept.hod : null);
+      let hod = (dept.hod && typeof dept.hod === 'object' && dept.hod._id) ? dept.hod : null;
+      
+      if (!hod && hodId) {
+          // If we have an ID but not the object, try to find the object in safeHods
+          hod = safeHods.find(h => String(h._id) === String(hodId));
+          // If still not found, create a placeholder object with the ID
+          if (!hod) hod = { _id: hodId, name: "Assigned HOD (Details Loading...)" };
+      } else if (!hod) {
+          // If dept.hod was empty, try to find a user who claims to be in this department as HOD
+          hod = safeHods.find(h => String(h.department?._id || h.department) === String(dept._id));
+      }
+      
       return { ...dept, hod };
   });
 
@@ -141,13 +212,22 @@ const HodManagement = () => {
         {isLoading ? <LoadingSkeleton count={4} /> : (
           <div className={`rounded-lg shadow-md border transition-colors ${getCardThemeClasses(appTheme)}`}>
             <div className="p-4 border-b border-inherit/30 flex justify-between items-center">
-              <h2 className="text-xl font-semibold">Departments & HODs</h2>
-              <button 
-                onClick={() => setIsCreatingDept(true)}
-                className={`text-sm font-bold py-1.5 px-3 rounded-lg flex items-center gap-1 transition-colors ${getPrimaryButtonClasses(appTheme)}`}
-              >
-                <Plus className="w-4 h-4" /> New Dept
-              </button>
+              <div className="flex flex-col">
+                <h2 className="text-xl font-semibold">Departments & HODs</h2>
+                {!isAdmin && (
+                  <span className="text-xs text-amber-500 flex items-center gap-1 mt-1">
+                    <AlertCircle className="w-3 h-3" /> Read-only mode (Admin access required for changes)
+                  </span>
+                )}
+              </div>
+              {isAdmin && (
+                <button 
+                  onClick={() => setIsCreatingDept(true)}
+                  className={`text-sm font-bold py-1.5 px-3 rounded-lg flex items-center gap-1 transition-colors ${getPrimaryButtonClasses(appTheme)}`}
+                >
+                  <Plus className="w-4 h-4" /> New Dept
+                </button>
+              )}
             </div>
             {isCreatingDept && (
               <div className="p-4 border-b border-inherit/30 bg-black/5 dark:bg-white/5">
@@ -232,29 +312,33 @@ const HodManagement = () => {
                     ) : (
                       <div className="flex flex-col group">
                         <div className="flex items-center gap-2">
-                          <p className="font-bold text-lg">{dept.name}</p>
-                          <button
-                            onClick={() => {
-                              setEditingDeptId(dept._id);
-                              setEditDeptData({ name: dept.name, code: dept.code });
-                            }}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-500 hover:text-blue-700 focus:opacity-100 p-1"
-                            title="Edit Department Details"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (window.confirm(`Are you sure you want to delete the ${dept.name} department?`)) {
-                                removeDept(dept._id);
-                              }
-                            }}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity text-red-500 hover:text-red-700 focus:opacity-100 p-1"
-                            title="Delete Department"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
+                           <p className="font-bold text-lg">{dept.name}</p>
+                           {isAdmin && (
+                             <>
+                               <button
+                                 onClick={() => {
+                                   setEditingDeptId(dept._id);
+                                   setEditDeptData({ name: dept.name, code: dept.code });
+                                 }}
+                                 className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-500 hover:text-blue-700 focus:opacity-100 p-1"
+                                 title="Edit Department Details"
+                               >
+                                 <Edit2 className="w-4 h-4" />
+                               </button>
+                               <button
+                                 onClick={() => {
+                                   if (window.confirm(`Are you sure you want to delete the ${dept.name} department?`)) {
+                                     removeDept(dept._id);
+                                   }
+                                 }}
+                                 className="opacity-0 group-hover:opacity-100 transition-opacity text-red-500 hover:text-red-700 focus:opacity-100 p-1"
+                                 title="Delete Department"
+                               >
+                                 <Trash2 className="w-4 h-4" />
+                               </button>
+                             </>
+                           )}
+                         </div>
                         <p className="text-sm text-inherit opacity-70">{dept.code}</p>
                       </div>
                     )}
@@ -270,22 +354,37 @@ const HodManagement = () => {
                                   <Crown className="w-3 h-3 text-yellow-500" />
                                   <span>HOD</span>
                               </div>
+                            </div>
                           </div>
-                      </div>
-                      <button
-                        onClick={() => handleAssignClick(dept)}
-                        className="text-xs font-semibold text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 ml-4"
-                      >
-                        Change
-                      </button>
+                       {isAdmin && (
+                        <div className="flex flex-col gap-1 ml-4 border-l border-inherit/30 pl-4">
+                          <button
+                            onClick={() => handleAssignClick(dept)}
+                            className="text-xs font-semibold text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-left"
+                          >
+                            Replace
+                          </button>
+                          <button
+                            onClick={() => handleRemoveHod(dept._id, dept.name)}
+                            disabled={isRemovingHod}
+                            className="text-xs font-semibold text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 text-left disabled:opacity-50"
+                          >
+                            {isRemovingHod ? "Removing..." : "Remove"}
+                          </button>
+                        </div>
+                       )}
                     </div>
                   ) : (
-                    <button
-                      onClick={() => handleAssignClick(dept)}
-                      className={`w-full sm:w-auto font-bold py-2 px-4 rounded-lg transition-colors shadow-sm ${getPrimaryButtonClasses(appTheme)}`}
-                    >
-                      Assign HOD
-                    </button>
+                    isAdmin ? (
+                      <button
+                        onClick={() => handleAssignClick(dept)}
+                        className={`w-full sm:w-auto font-bold py-2 px-4 rounded-lg transition-colors shadow-sm ${getPrimaryButtonClasses(appTheme)}`}
+                      >
+                        Assign HOD
+                      </button>
+                    ) : (
+                      <span className="text-xs font-medium opacity-50 px-4">Not Assigned</span>
+                    )
                   )}
                 </li>
               )})}
@@ -299,7 +398,17 @@ const HodManagement = () => {
               Assign HOD for <span className="text-blue-500">{targetDepartment.name}</span>
             </h3>
             <div className="flex flex-col gap-4">
-              <p className="text-sm text-inherit opacity-80">Select a teacher to promote to HOD. This will change their role and grant them HOD permissions for this department.</p>
+              <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-start gap-3">
+                <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
+                <div className="text-sm">
+                  <p className="font-semibold text-blue-600 dark:text-blue-400">Important Role Consequence:</p>
+                  <p className="opacity-80">
+                    Assigning a <strong>Teacher</strong> as HOD will promote them and grant full administrative access to this department. 
+                    Assigning an <strong>Admin</strong> will link them as HOD without changing their Admin role.
+                    {targetDepartment.hod && <span className="block mt-1 text-red-500 font-bold italic">Note: The current HOD will be demoted to Teacher.</span>}
+                  </p>
+                </div>
+              </div>
               <Select
                 options={teachers}
                 value={selectedTeacher}

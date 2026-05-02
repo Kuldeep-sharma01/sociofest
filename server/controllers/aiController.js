@@ -13,6 +13,8 @@ import {
 import AIModelConfig from "../models/AIModelConfig.js";
 import { runWithFallbackChain } from "../utils/aiProviderRouter.js";
 import { readSystemSettings } from "../utils/systemSettings.js";
+import { mergeAudioWithBackground } from "../utils/audioHelper.js";
+import { v4 as uuidv4 } from "uuid";
 
 // Lazily load GenAI so missing production keys throw immediate 500s instead of falling back to test mocks
 const getGenAI = () => {
@@ -173,10 +175,28 @@ export const generateContent = async (req, res) => {
 };
 
 export const transcribeAudio = async (req, res) => {
+  let filePathToTranscribe = req.file?.path;
   try {
     const accessCheck = await assertAiAccess(req);
     if (accessCheck.error) return res.status(accessCheck.status).json({ message: accessCheck.message });
-    if (!req.file) return badRequest(res, "Audio file is required");
+
+
+    if (!filePathToTranscribe && req.body.sourceAudioUrl) {
+      let cleanPath = req.body.sourceAudioUrl.replace(/\\/g, "/");
+      if (cleanPath.startsWith("http")) {
+        try {
+          const urlObj = new URL(req.body.sourceAudioUrl);
+          cleanPath = urlObj.pathname;
+        } catch (e) { }
+      }
+      if (cleanPath.startsWith("/")) cleanPath = cleanPath.substring(1);
+      const fullSourcePath = path.resolve(process.cwd(), cleanPath);
+      if (fs.existsSync(fullSourcePath)) {
+        filePathToTranscribe = fullSourcePath;
+      }
+    }
+
+    if (!filePathToTranscribe) return badRequest(res, "Audio file or sourceAudioUrl is required");
 
     if (process.env.NODE_ENV === "test" || !process.env.GEMINI_API_KEY) {
       return ok(
@@ -192,16 +212,21 @@ export const transcribeAudio = async (req, res) => {
 
     const genAI = getGenAI();
     if (!genAI) {
-      return serverError(
-        res,
-        "AI Configuration Error: GEMINI_API_KEY is missing in the server environment.",
-      );
+      throw new Error("GEMINI_API_KEY is missing");
+    }
+
+    // Prevent Node.js RAM crashes and Gemini payload limits by routing large files directly to Whisper
+    const stats = await fs.promises.stat(filePathToTranscribe);
+    const fileSizeMB = stats.size / (1024 * 1024);
+    if (fileSizeMB > 15) {
+      console.log(`[AI] File is ${fileSizeMB.toFixed(2)}MB (exceeds Gemini 15MB inline limit). Routing directly to local Whisper...`);
+      throw new Error("File too large for Gemini inlineData API");
     }
 
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     const audioPart = await fileToGenerativePart(
-      req.file.path,
-      req.file.mimetype || "audio/mp3",
+      filePathToTranscribe,
+      req.file?.mimetype || (filePathToTranscribe.endsWith(".mp4") ? "video/mp4" : "audio/mp3"),
     );
     const result = await model.generateContent([
       "Transcribe this audio accurately. Return only raw text.",
@@ -211,11 +236,11 @@ export const transcribeAudio = async (req, res) => {
     const text = result.response.text();
     return ok(res, { text, vtt: `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\n${text}` }, "Audio transcribed via Gemini");
   } catch (error) {
-    console.log("Gemini transcription failed, trying local fallback...");
+    console.log(`Gemini transcription skipped/failed (${error.message}), trying local fallback...`);
     try {
       const pythonUrl = process.env.PYTHON_INTERNAL_URL || process.env.PYTHON_URL || "http://localhost:5001";
       const formData = new FormData();
-      formData.append('file', fs.createReadStream(req.file.path), req.file.originalname);
+      formData.append('file', fs.createReadStream(filePathToTranscribe), req.file?.originalname || path.basename(filePathToTranscribe));
 
       const response = await axios.post(`${pythonUrl}/voice-api/transcribe`, formData, {
         headers: {
@@ -331,19 +356,21 @@ export const translateMedia = async (req, res) => {
     }
 
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const prompt = `Translate the following text from ${normalizeLang(sourceLanguage)} to ${normalizeLang(targetLanguage)}:\n\n${text}`;
+    const prompt = `Translate the following text from ${normalizeLang(sourceLanguage)} to ${normalizeLang(targetLanguage)}:\n\n${text}\n\nMaintain the original tone and context. If this looks like a subtitle/VTT format, translate the dialogue but keep the timestamps exactly as they are.`;
 
     const result = await model.generateContent(prompt);
     const translatedText = result.response.text();
 
-    // Generate VTT and redirect to TTS for multi-lingual dubbing
-    const translatedVtt = `WEBVTT\n\n00:00:00.000 --> 00:10:00.000\n${translatedText}`;
-    const translatedAudioUrl = `/api/ai/text-to-speech?text=${encodeURIComponent(translatedText.substring(0, 150))}&language=${targetLanguage}`;
+    // If the input was VTT, we return the translated VTT directly
+    const isVtt = text.includes("WEBVTT") || text.includes("-->");
+    const translatedVtt = isVtt
+      ? translatedText
+      : `WEBVTT\n\n00:00:00.000 --> 00:10:00.000\n${translatedText}`;
 
     ok(
       res,
-      { translatedText, translatedVtt, translatedAudioUrl },
-      "Translation completed successfully",
+      { translatedText, translatedVtt },
+      "Translation completed successfully. You can now edit the script before dubbing.",
     );
   } catch (error) {
     console.error("Translation Error:", error);
@@ -364,6 +391,8 @@ export const textToSpeech = async (req, res) => {
     const provider = req.body.provider || req.query.provider;
     const speed = req.body.speed || req.query.speed;
     const language = req.body.language || req.query.language || 'en';
+    const mergeBackground = req.body.mergeBackground === true || req.query.mergeBackground === 'true';
+    const sourceAudioUrl = req.body.sourceAudioUrl || req.query.sourceAudioUrl;
 
     // ✅ Validate before calling external API
     const MAX_TTS_LENGTH = 4096;
@@ -375,76 +404,129 @@ export const textToSpeech = async (req, res) => {
     const safeSpeed = Math.min(4.0, Math.max(0.25, parseFloat(speed) || 1.0));
 
     const useProvider = provider || (process.env.OPENAI_API_KEY ? "openai" : "google_free");
+    let audioBuffer = null;
+    let contentType = "audio/mpeg";
 
     if (useProvider === "openai") {
       const apiKey = process.env.OPENAI_API_KEY;
       if (!apiKey) return serverError(res, "OpenAI API key is missing. Cannot generate speech.");
-
-      // Map to supported OpenAI voices or fallback to 'alloy'
       const openAiVoice = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"].includes(voice) ? voice : "alloy";
-
       const response = await axios.post(
         "https://api.openai.com/v1/audio/speech",
-        {
-          model: "tts-1",
-          input: text,
-          voice: openAiVoice,
-          speed: safeSpeed,
-        },
-        {
-          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          responseType: "arraybuffer"
-        }
+        { model: "tts-1", input: text, voice: openAiVoice, speed: safeSpeed },
+        { headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, responseType: "arraybuffer" }
       );
-
-      res.setHeader("Content-Type", "audio/mpeg");
-      return res.send(Buffer.from(response.data));
-    }
-
-    if (useProvider === "google_free") {
-      const safeText = text.substring(0, 200); // Google Free TTS has a 200 char length limit
+      audioBuffer = Buffer.from(response.data);
+      contentType = "audio/mpeg";
+    } else if (useProvider === "google_free") {
+      const safeText = text.substring(0, 200);
       const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(safeText)}&tl=${language}&client=tw-ob`;
       const response = await axios.get(url, { responseType: "arraybuffer" });
-      res.setHeader("Content-Type", "audio/mpeg");
-      return res.send(Buffer.from(response.data));
-    }
-
-    if (useProvider === "local" || useProvider === "python") {
+      audioBuffer = Buffer.from(response.data);
+      contentType = "audio/mpeg";
+    } else if (useProvider === "local" || useProvider === "python") {
       const pythonUrl = process.env.PYTHON_INTERNAL_URL || process.env.PYTHON_URL || "http://localhost:5001";
       const formData = new FormData();
       formData.append('text', text);
       formData.append('language', language);
-
       const useUserVoice = req.body.useUserVoice || req.query.useUserVoice === 'true';
 
-      // If a reference voice file was uploaded, use it. 
       if (req.file) {
         formData.append('speaker_wav', fs.createReadStream(req.file.path), req.file.originalname);
       } else if (useUserVoice && req.user) {
-        // Check if user has a saved voice
         const voicePath = `uploads/voices/user_${req.user._id}.wav`;
         if (fs.existsSync(voicePath)) {
           formData.append('speaker_wav', fs.createReadStream(voicePath), `user_${req.user._id}.wav`);
         } else {
           return badRequest(res, "User voice profile not found. Please upload your voice first.");
         }
+      } else if (sourceAudioUrl) {
+        // Automatically extract voice from the source video to clone!
+        let cleanPath = sourceAudioUrl.replace(/\\/g, "/");
+        if (cleanPath.startsWith("http")) {
+          try {
+            const urlObj = new URL(sourceAudioUrl);
+            cleanPath = urlObj.pathname;
+          } catch (e) { }
+        }
+        if (cleanPath.startsWith("/")) cleanPath = cleanPath.substring(1);
+        const fullSourcePath = path.resolve(process.cwd(), cleanPath);
+
+        if (fs.existsSync(fullSourcePath)) {
+          const os = await import("os");
+          const { execFile } = await import("child_process");
+          const util = await import("util");
+          const execFileAsync = util.promisify(execFile);
+
+          const samplePath = path.join(os.tmpdir(), `sample_${uuidv4()}.wav`);
+          try {
+            // Extract a 15-second mono WAV sample for Coqui XTTSv2
+            await execFileAsync("ffmpeg", [
+              "-y", "-i", fullSourcePath,
+              "-t", "15", "-ac", "1", "-ar", "22050", samplePath
+            ]);
+            formData.append('speaker_wav', fs.createReadStream(samplePath), `sample.wav`);
+
+            // Clean up the sample after the request is complete
+            res.on('finish', () => {
+              fs.promises.unlink(samplePath).catch(() => { });
+            });
+          } catch (ffmpegErr) {
+            console.error("FFmpeg voice extraction failed:", ffmpegErr);
+            return serverError(res, "Failed to extract voice sample for cloning.");
+          }
+        } else {
+          return badRequest(res, "Source audio file not found for voice cloning.");
+        }
       } else {
-        return badRequest(res, "Voice cloning requires a reference 'speaker_wav' file upload or a saved user voice profile.");
+        return badRequest(res, "Voice cloning requires a reference 'speaker_wav' file upload, a saved user voice profile, or a source audio URL.");
       }
 
       const response = await axios.post(`${pythonUrl}/voice-api/clone-voice`, formData, {
-        headers: {
-          ...formData.getHeaders(),
-          'Authorization': req.headers.authorization
-        },
+        headers: { ...formData.getHeaders(), 'Authorization': req.headers.authorization },
         responseType: "arraybuffer"
       });
-
-      res.setHeader("Content-Type", "audio/wav");
-      return res.send(Buffer.from(response.data));
+      audioBuffer = Buffer.from(response.data);
+      contentType = "audio/wav";
     }
 
-    return unprocessableEntity(res, `TTS provider '${useProvider}' is not supported yet.`);
+    if (!audioBuffer) {
+      return unprocessableEntity(res, `TTS provider '${useProvider}' is not supported yet.`);
+    }
+
+    // --- POST-PROCESSING: Merge Background Sound ---
+    if (mergeBackground && sourceAudioUrl) {
+      try {
+        let cleanPath = sourceAudioUrl.replace(/\\/g, "/");
+        if (cleanPath.startsWith("http")) {
+          const urlObj = new URL(sourceAudioUrl);
+          cleanPath = urlObj.pathname;
+        }
+        if (cleanPath.startsWith("/")) cleanPath = cleanPath.substring(1);
+        const fullSourcePath = path.resolve(process.cwd(), cleanPath);
+
+        if (fs.existsSync(fullSourcePath)) {
+          const os = await import("os");
+          const tempDubPath = path.join(os.tmpdir(), `dub_${uuidv4()}.wav`);
+          const mergedPath = path.join(os.tmpdir(), `merged_${uuidv4()}.wav`);
+
+          await fs.promises.writeFile(tempDubPath, audioBuffer);
+          await mergeAudioWithBackground(tempDubPath, fullSourcePath, mergedPath);
+
+          audioBuffer = await fs.promises.readFile(mergedPath);
+          contentType = "audio/wav";
+
+          // Cleanup
+          fs.promises.unlink(tempDubPath).catch(() => { });
+          fs.promises.unlink(mergedPath).catch(() => { });
+        }
+      } catch (mergeErr) {
+        console.warn("Background merging failed, returning clean dub:", mergeErr.message);
+      }
+    }
+
+    res.setHeader("Content-Type", contentType);
+    return res.send(audioBuffer);
   } catch (error) {
     console.error("Text-to-Speech Error:", error.message);
     return serverError(res, error.response?.data?.error?.message || error.message);
@@ -1596,6 +1678,9 @@ export const pullOllamaModel = async (req, res) => {
 
 export const uploadUserVoice = async (req, res) => {
   try {
+    const accessCheck = await assertAiAccess(req);
+    if (accessCheck.error) return res.status(accessCheck.status).json({ message: accessCheck.message });
+
     if (!req.file) return badRequest(res, "Audio file is required");
 
     const voiceDir = path.resolve(process.cwd(), 'uploads/voices');

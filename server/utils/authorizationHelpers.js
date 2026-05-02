@@ -10,7 +10,7 @@ import ActivityLog from '../models/ActivityLog.js';
 import Teacher from '../models/Teacher.js';
 import Student from '../models/Student.js';
 import Connection from '../models/Connection.js';
-import { hasPermission } from './rbac.js';
+import { hasPermission, ROLES } from './rbac.js';
 
 /**
  * Check if user can perform action on resource with given scope
@@ -372,14 +372,34 @@ export const getActivitiesForUser = async (user, viewType = 'micro', filters = {
   };
 
   // Role-based scope filtering
-  switch (user.role) {
-    case 'Admin':
-      // Admin can see all activities in all views
+  const role = user.role?.toLowerCase();
+  
+  if (role === ROLES.ADMIN.toLowerCase()) {
+    // Admin can see all activities in all views
+    return ActivityLog.find({
+      ...query,
+      $or: [
+        { visibility: 'global' },
+        { visibility: 'admin_only' },
+        { visibility: 'personal', 'actor.userId': user._id },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(safeLimit)
+      .populate('actor.userId', 'name email')
+      .populate('departmentId', 'name');
+  }
+
+  if (role === ROLES.HOD.toLowerCase()) {
+    if (viewType === 'macro') {
+      // Department-level view
       return ActivityLog.find({
         ...query,
         $or: [
           { visibility: 'global' },
-          { visibility: 'admin_only' },
+          { visibility: 'department', departmentId: user.department },
+          { visibility: 'hod_only', 'actor.department': user.department },
           { visibility: 'personal', 'actor.userId': user._id },
         ],
       })
@@ -388,43 +408,25 @@ export const getActivitiesForUser = async (user, viewType = 'micro', filters = {
         .limit(safeLimit)
         .populate('actor.userId', 'name email')
         .populate('departmentId', 'name');
-
-    case 'HOD':
-      if (viewType === 'macro') {
-        // Department-level view
-        return ActivityLog.find({
-          ...query,
-          $or: [
-            { visibility: 'global' },
-            { visibility: 'department', departmentId: user.department },
-            { visibility: 'hod_only', 'actor.department': user.department },
-            { visibility: 'personal', 'actor.userId': user._id },
-          ],
-        })
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(safeLimit)
-          .populate('actor.userId', 'name email')
-          .populate('departmentId', 'name');
-      } else {
-        // Personal view
-        return ActivityLog.find({
-          'actor.userId': user._id,
-        })
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(safeLimit);
-      }
-
-    case 'Teacher':
-    case 'Student':
-      // Both roles only ever see their own activities, regardless of viewType
+    } else {
+      // Personal view
       return ActivityLog.find({
         'actor.userId': user._id,
       })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(safeLimit);
+    }
+  }
+
+  if (role === ROLES.TEACHER.toLowerCase() || role === ROLES.STUDENT.toLowerCase()) {
+    // Both roles only ever see their own activities, regardless of viewType
+    return ActivityLog.find({
+      'actor.userId': user._id,
+    })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(safeLimit);
   }
 
   return ActivityLog.find(query)

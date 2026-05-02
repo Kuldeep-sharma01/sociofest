@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import EmailManager from '@/components/settings/EmailManager';
+import VoiceSettings from '@/components/settings/VoiceSettings';
 import { useSelector } from 'react-redux';
 import { getUserById } from '@/services/userService';
 import { useTheme } from '@/context/ThemeContext';
@@ -46,7 +47,16 @@ const SettingsPage = () => {
           </div>
         ) : userDetails ? (
           <div className="flex flex-col gap-6 animate-in fade-in zoom-in-95 duration-200">
-            <EmailManager user={userDetails} setUser={handleUserUpdate} />
+            <div className={`p-6 rounded-2xl border border-inherit/20 shadow-xl ${getCardThemeClasses(appTheme)}`}>
+              <EmailManager user={userDetails} setUser={handleUserUpdate} />
+            </div>
+            
+            <div className={`p-6 rounded-2xl border border-inherit/20 shadow-xl ${getCardThemeClasses(appTheme)}`}>
+              <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                Voice & Identity
+              </h2>
+              <VoiceSettings user={userDetails} />
+            </div>
           </div>
         ) : (
           <div className={`p-8 text-center rounded-xl border border-inherit/20 shadow-sm ${getCardThemeClasses(appTheme)}`}>

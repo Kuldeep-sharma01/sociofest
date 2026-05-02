@@ -9,7 +9,7 @@ const studentSchema = new mongoose.Schema(
       index: true,
     },
     rollNumber: {
-      type: Number,
+      type: String,
     },
     semester: {
       type: Number,

@@ -17,6 +17,7 @@ import Material from "../models/Material.js";
 import PushSubscription from "../models/PushSubscription.js";
 import webpush from "../utils/webPushConfig.js";
 import Media from "../models/Media.js";
+import { readSystemSettings } from "../utils/systemSettings.js";
 import {
   ok,
   created,
@@ -141,6 +142,10 @@ const dispatchChatNotifications = async (req, conversation, message, mappedMessa
 
 export const sendMessage = async (req, res, next) => {
   try {
+    const systemSettings = await readSystemSettings();
+    if (systemSettings.serviceControls?.chatEnabled === false) {
+      return forbidden(res, "Chat features are currently disabled by admin.");
+    }
     const receiverId = req.params.receiverId || req.body.receiverId;
     if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId.toString())) {
       return badRequest(res, "Invalid Receiver ID");
@@ -421,6 +426,10 @@ export const searchUsersForChat = async (req, res, next) => {
  */
 export const getConversations = async (req, res, next) => {
   try {
+    const systemSettings = await readSystemSettings();
+    if (systemSettings.serviceControls?.chatEnabled === false) {
+      return ok(res, [], "Chat is currently disabled by admin.");
+    }
     const currentUserId = req.user._id;
     const userObjectId = new mongoose.Types.ObjectId(currentUserId.toString());
 

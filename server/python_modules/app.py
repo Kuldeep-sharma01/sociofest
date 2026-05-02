@@ -2,6 +2,11 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', message='.*pkg_resources is deprecated.*')
+
 # OPTIMIZATION: Centralize and persist model caches to prevent redundant downloads (saves huge storage/bandwidth)
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model_cache')
 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -10,18 +15,71 @@ os.environ['HF_HOME'] = CACHE_DIR
 
 
 
-# Monkeypatch for huggingface_hub compatibility (fixes 'hf_cache_home' import error in older diffusers/transformers)
+# Monkeypatch for huggingface_hub compatibility (fixes 'hf_cache_home' and 'HfFolder' import errors in newer versions)
 try:
-    import huggingface_hub.constants
-    if not hasattr(huggingface_hub.constants, 'hf_cache_home'):
-        huggingface_hub.constants.hf_cache_home = CACHE_DIR
-except ImportError:
+    import huggingface_hub
+    huggingface_hub.__version__ = "0.23.0"
+except Exception:
     pass
 
-import warnings
-warnings.filterwarnings('ignore', category=FutureWarning)
-warnings.filterwarnings('ignore', category=DeprecationWarning)
-warnings.filterwarnings('ignore', message='.*pkg_resources is deprecated.*')
+try:
+    import huggingface_hub
+    import huggingface_hub.constants
+    
+    # Fix hf_cache_home
+    if not hasattr(huggingface_hub.constants, 'hf_cache_home'):
+        huggingface_hub.constants.hf_cache_home = CACHE_DIR
+except Exception:
+    pass
+
+try:
+    import huggingface_hub
+    # Fix HfFolder (moved in newer versions)
+    if not hasattr(huggingface_hub, 'HfFolder'):
+        class DummyHfFolder:
+            @staticmethod
+            def get_token():
+                return os.getenv("HF_TOKEN")
+            @staticmethod
+            def save_token(token):
+                pass
+        huggingface_hub.HfFolder = DummyHfFolder
+except Exception:
+    pass
+
+try:
+    import huggingface_hub
+    import huggingface_hub.file_download
+    # Fix cached_download (removed in huggingface_hub >= 0.23.0, breaks older diffusers/TTS)
+    if not hasattr(huggingface_hub, 'cached_download'):
+        huggingface_hub.cached_download = huggingface_hub.file_download.hf_hub_download
+        huggingface_hub.file_download.cached_download = huggingface_hub.file_download.hf_hub_download
+except Exception:
+    pass
+
+try:
+    # Fix transformers version check for huggingface-hub >= 1.0.0
+    import importlib.metadata
+    _orig_version = importlib.metadata.version
+    def _patched_version(pkg):
+        if pkg in ('huggingface-hub', 'huggingface_hub'):
+            return '0.23.0'
+        return _orig_version(pkg)
+    importlib.metadata.version = _patched_version
+except Exception:
+    pass
+
+try:
+    import pkg_resources
+    _orig_get_dist = pkg_resources.get_distribution
+    def _patched_get_dist(pkg):
+        if pkg in ('huggingface-hub', 'huggingface_hub'):
+            class _MockDist: version = '0.23.0'
+            return _MockDist()
+        return _orig_get_dist(pkg)
+    pkg_resources.get_distribution = _patched_get_dist
+except Exception:
+    pass
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -85,30 +143,36 @@ CORS(app,
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
 
-# Load pre-trained feature extractor from TensorFlow Hub (used for embeddings)
-print("[STARTUP] Loading facial recognition model...")
-model_url = "https://tfhub.dev/google/imagenet/mobilenet_v2_100_224/feature_vector/5"
-try:
-    face_model = hub.load(model_url)
-except Exception as e:
-    print(f"[WARNING] Primary model load failed: {e}")
-    if "Access is denied" in str(e):
-        print("[STARTUP] Detected Windows file lock. Retrying in 2 seconds...")
-        import time
-        time.sleep(2)
-        try:
-            face_model = hub.load(model_url)
-        except Exception:
-            print("[CRITICAL] Could not load facial recognition model. Face ID features will be disabled.")
+import threading
+
+face_model = None
+def load_face_model_async():
+    global face_model
+    print("[BACKGROUND] Loading facial recognition model...")
+    model_url = "https://tfhub.dev/google/imagenet/mobilenet_v2_100_224/feature_vector/5"
+    try:
+        face_model = hub.load(model_url)
+        print("[BACKGROUND] Facial recognition model loaded successfully")
+    except Exception as e:
+        print(f"[WARNING] Primary model load failed: {e}")
+        if "Access is denied" in str(e):
+            print("[BACKGROUND] Detected Windows file lock. Retrying in 2 seconds...")
+            import time
+            time.sleep(2)
+            try:
+                face_model = hub.load(model_url)
+                print("[BACKGROUND] Facial recognition model loaded successfully")
+            except Exception:
+                print("[CRITICAL] Could not load facial recognition model. Face ID features will be disabled.")
+                face_model = None
+        else:
             face_model = None
-    else:
-        face_model = None
+
+threading.Thread(target=load_face_model_async, daemon=True).start()
 
 # Load face detector (using OpenCV's Haar Cascade)
 prototxt = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
 face_cascade = cv2.CascadeClassifier(prototxt)
-
-print("[STARTUP] Models loaded successfully")
 
 # Connect to MongoDB (Unified Single Database Architecture)
 MONGODB_URI = os.getenv('MONGODB_URI') or 'mongodb://localhost:27017/sociofestdb'
@@ -151,12 +215,17 @@ def decrypt_encoding(encrypted) -> list:
     return json.loads(fernet.decrypt(str(encrypted).encode()))
 
 # ✅ Validate file signature before processing
-import imghdr
 
 ALLOWED_IMAGE_TYPES = {'jpeg', 'png', 'webp', 'bmp'}
 
 def validate_image_bytes(image_bytes):
-    detected = imghdr.what(None, h=image_bytes)
+    header = image_bytes[:12]
+    if header.startswith(b'\xff\xd8\xff'): detected = 'jpeg'
+    elif header.startswith(b'\x89PNG\r\n\x1a\n'): detected = 'png'
+    elif header.startswith(b'RIFF') and header[8:12] == b'WEBP': detected = 'webp'
+    elif header.startswith(b'BM'): detected = 'bmp'
+    else: detected = None
+
     if detected not in ALLOWED_IMAGE_TYPES:
         return False, f"Unsupported image type: {detected}"
     return True, "ok"
@@ -218,6 +287,9 @@ def extract_face_encoding(image_bytes, include_assessment=False):
     Extract face encoding from image bytes using TensorFlow
     Returns: (encoding, message, assessment)
     """
+    if face_model is None:
+        return None, "Face recognition model is still loading. Please wait a moment and try again.", None
+
     try:
         nparr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)

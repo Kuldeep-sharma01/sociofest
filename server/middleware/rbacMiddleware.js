@@ -5,6 +5,7 @@
  */
 
 import { checkPermission, logActivity } from '../utils/authorizationHelpers.js';
+import { ROLES } from '../utils/rbac.js';
 
 /**
  * Permission-based middleware factory
@@ -123,19 +124,23 @@ export const ownsOrCanAccess = (resource, options = {}) => {
 export const departmentScopeCheck = (req, res, next) => {
   const { departmentId } = req.params;
 
-  if (req.user.role === 'Admin') {
+  const userRole = req.user.role?.toLowerCase();
+  
+  if (userRole === ROLES.ADMIN.toLowerCase()) {
     return next(); // Admins can access all departments
   }
-if (!req.user?.department) {
-  return res.status(403).json({ message: "User department is not assigned" });
-}
-  if (req.user.role === 'HOD' && req.user.department.toString() !== departmentId) {
+  
+  if (!req.user?.department) {
+    return res.status(403).json({ message: "User department is not assigned" });
+  }
+  
+  if (userRole === ROLES.HOD.toLowerCase() && req.user.department.toString() !== departmentId) {
     return res.status(403).json({
       message: 'HOD can only access their own department',
     });
   }
 
-  if (['Teacher', 'Student'].includes(req.user.role) && req.user.department.toString() !== departmentId) {
+  if ([ROLES.TEACHER.toLowerCase(), ROLES.STUDENT.toLowerCase()].includes(userRole) && req.user.department.toString() !== departmentId) {
     return res.status(403).json({
       message: 'You can only access your own department',
     });
@@ -210,23 +215,20 @@ export const auditLog = (resource, action) => {
  * Helper: Determine visibility level based on user role
  */
 const determineVisibility = (userRole) => {
-  switch (userRole) {
-    case 'Admin':
-      return 'admin_only';
-    case 'HOD':
-      return 'hod_only';
-    default:
-      return 'personal';
-  }
+  const role = userRole?.toLowerCase();
+  if (role === ROLES.ADMIN.toLowerCase()) return 'admin_only';
+  if (role === ROLES.HOD.toLowerCase()) return 'hod_only';
+  return 'personal';
 };
 
 /**
  * Helper: Determine scope of activity
  */
 const determineScope = (req) => {
-  if (req.user?.role === 'Admin') return 'global';
-  if (req.user?.role === 'HOD') return 'department';
-  if (req.user?.role === 'Teacher') return 'subject';
+  const role = req.user?.role?.toLowerCase();
+  if (role === ROLES.ADMIN.toLowerCase()) return 'global';
+  if (role === ROLES.HOD.toLowerCase()) return 'department';
+  if (role === ROLES.TEACHER.toLowerCase()) return 'subject';
   return 'personal';
 };
 
@@ -247,13 +249,14 @@ export const injectRoleBasedFilters = (resource) => {
  */
 const buildFiltersForRole = (user, resource) => {
   const filters = {};
+  const role = user.role?.toLowerCase();
 
-  if (user.role === 'Admin') {
+  if (role === ROLES.ADMIN.toLowerCase()) {
     // Admin sees everything
     return filters;
   }
 
-  if (user.role === 'HOD') {
+  if (role === ROLES.HOD.toLowerCase()) {
     // HOD sees department + public
     filters.$or = [
       { department: user.department },
@@ -262,7 +265,7 @@ const buildFiltersForRole = (user, resource) => {
     return filters;
   }
 
-  if (user.role === 'Teacher') {
+  if (role === ROLES.TEACHER.toLowerCase()) {
     // Teacher sees own department and public
     filters.$or = [
       { author: user._id },
@@ -272,7 +275,7 @@ const buildFiltersForRole = (user, resource) => {
     return filters;
   }
 
-  if (user.role === 'Student') {
+  if (role === ROLES.STUDENT.toLowerCase()) {
     // Student sees public and their enrolled subjects
     filters.$or = [
       { isPublic: true },
@@ -291,7 +294,8 @@ const buildFiltersForRole = (user, resource) => {
  * Middleware to check if user has elevated privileges (Admin/HOD)
  */
 export const requireElevatedPrivilege = (req, res, next) => {
-  if (!['Admin', 'HOD'].includes(req.user?.role)) {
+  const role = req.user?.role?.toLowerCase();
+  if (role !== ROLES.ADMIN.toLowerCase() && role !== ROLES.HOD.toLowerCase()) {
     return res.status(403).json({
       message: 'This action requires elevated privileges (Admin or HOD)',
     });
@@ -299,11 +303,8 @@ export const requireElevatedPrivilege = (req, res, next) => {
   next();
 };
 
-/**
- * Middleware to check if user has admin privileges
- */
 export const requireAdmin = (req, res, next) => {
-  if (req.user?.role !== 'Admin') {
+  if (req.user?.role?.toLowerCase() !== ROLES.ADMIN.toLowerCase()) {
     return res.status(403).json({
       message: 'This action requires admin privileges',
     });
@@ -324,7 +325,8 @@ export const parseViewType = (req, res, next) => {
   }
 
   // Only Admin and HOD can access macro views
-  if (viewType === 'macro' && !['Admin', 'HOD'].includes(req.user?.role)) {
+  const role = req.user?.role?.toLowerCase();
+  if (viewType === 'macro' && role !== ROLES.ADMIN.toLowerCase() && role !== ROLES.HOD.toLowerCase()) {
     return res.status(403).json({
       message: 'Only Admin and HOD can access macro views',
     });
