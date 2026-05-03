@@ -64,7 +64,7 @@ def upload_media():
             return jsonify({
                 'success': True,
                 'file_id': result['file_id'],
-                'url': f"/media/download/{result['file_id']}",
+                'url': f"/{result['file_id']}",
                 'filename': filename,
                 'size_mb': round(file_size_gb * 1024, 2),
                 'media_type': result['media_type'],

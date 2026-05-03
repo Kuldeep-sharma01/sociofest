@@ -56,13 +56,13 @@ SocioFest is now powered by a **Monolithic Python AI Gateway**. Face Recognition
 
 ## 🧬 2. AI Model Management (Linking & Uploading)
 
-The Python service manages its models via the `server/python_modules/model_cache` directory.
+The Python service manages its models via the `python_modules/model_cache` directory.
 
 ### 🖼️ Image Generation (Stable Diffusion)
 - **Automatic:** On the first request, the server will download `runwayml/stable-diffusion-v1-5` from HuggingFace to the `model_cache`.
-- **Manual (WebUI Style):** You can place custom `.safetensors` or `.ckpt` files in `server/python_modules/stable_diffusion_models/` and update `image_config.json` to link them.
+- **Manual (WebUI Style):** You can place custom `.safetensors` or `.ckpt` files in `python_modules/stable_diffusion_models/` and update `image_config.json` to link them.
 - **Optimization:** The gateway uses a **1-worker ThreadPool**. This prevents GPU VRAM crashes by processing image requests one at a time.
-- **⚠️ CRITICAL (Production):** AI models (XTTS, SD, Whisper) are huge (1GB - 4GB). If deploying to Render/Railway, you **MUST** attach a **Persistent Volume** to `/server/python_modules/model_cache`. Without this, your server will re-download models on every restart, causing a 5-10 minute "Cold Start" delay.
+- **⚠️ CRITICAL (Production):** AI models (XTTS, SD, Whisper) are huge (1GB - 4GB). If deploying to Render/Railway, you **MUST** attach a **Persistent Volume** to `/python_modules/model_cache`. Without this, your server will re-download models on every restart, causing a 5-10 minute "Cold Start" delay.
 
 ### 🎙️ Voice AI (TTS & STT)
 - **Models:** Uses `xtts_v2` for voice cloning and `whisper-base` for transcription.
@@ -83,7 +83,7 @@ The Python service manages its models via the `server/python_modules/model_cache
 ## 🚀 3. Deployment Steps
 
 ### Step A: Deploy Python AI (Render/Railway/VPS)
-**Root Directory:** `server/python_modules`  
+**Root Directory:** `python_modules`  
 **Port:** 5001
 1. Install dependencies: `pip install -r requirements.txt`
 2. Start Command: `python app.py`
@@ -106,7 +106,7 @@ The Python service manages its models via the `server/python_modules/model_cache
 
 ```bash
 # Start the unified AI Gateway
-cd server/python_modules
+cd python_modules
 python app.py
 
 # Start Node Backend

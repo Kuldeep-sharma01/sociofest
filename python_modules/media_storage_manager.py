@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 class MediaStorageConfig(StorageConfig):
     """Media-specific storage configuration (inherits from StorageConfig)"""
     
+    SECTION_NAME = 'media_storage'
     CONFIG_FILE = Path(__file__).parent / 'media_storage_config.json'
     
     DEFAULT_CONFIG = {
@@ -40,7 +41,7 @@ class MediaStorageConfig(StorageConfig):
                     'enabled': True,
                     'priority': 1,
                     'config': {
-                        'path': '../uploads/media'
+                        'path': '../server/uploads/media'
                     }
                 },
                 {
@@ -100,33 +101,21 @@ class MediaStorageConfig(StorageConfig):
     }
 
     def _validate_config(self, config: dict) -> bool:
+        """Extend validation with media-specific keys"""
+        # First use base validation for common fields and path traversal
+        if not super()._validate_config(config):
+            return False
+            
         try:
-            storage = config['media_storage']
-            assert isinstance(storage['large_file_threshold_gb'], (int, float))
-            for b in storage['backends']:
-                assert isinstance(b['priority'], int) and 1 <= b['priority'] <= 999
-                assert isinstance(b['enabled'], bool)
+            storage = config[self.SECTION_NAME]
+            assert 'supported_types' in storage
+            assert 'max_file_size_gb' in storage
             return True
-        except (KeyError, AssertionError, TypeError) as e:
-            logger.error(f"Media config validation failed: {e}")
+        except (KeyError, AssertionError) as e:
+            logger.error(f"Media-specific validation failed: {e}")
             return False
 
-    def _build_backends(self):
-        """Build StorageBackend objects from media_storage config"""
-        self.backends = []
-        # CRITICAL FIX: Use 'media_storage' key instead of 'model_storage' from parent
-        for backend_cfg in self.config['media_storage']['backends']:
-            backend = StorageBackend(
-                type=backend_cfg['type'],
-                name=backend_cfg['name'],
-                enabled=backend_cfg['enabled'],
-                priority=backend_cfg['priority'],
-                config=backend_cfg['config']
-            )
-            self.backends.append(backend)
-        
-        # Sort by priority
-        self.backends.sort(key=lambda x: x.priority)
+    # _build_backends and update_backend are now handled by the base class!
 
 
 class MediaStorageManager:
@@ -138,7 +127,7 @@ class MediaStorageManager:
         self._init_backends()
         local_backend = next((b for b in self.storage_config.config['media_storage']['backends'] if b['type'] == 'local'), None)
         if local_backend and 'config' in local_backend and 'path' in local_backend['config']:
-            # Base path for local storage (e.g., ../uploads/media)
+            # Base path for local storage (e.g., ../server/uploads/media)
             self.local_path = Path(local_backend['config']['path'])
         else:
             self.local_path = Path('media_uploads')
@@ -257,9 +246,9 @@ class MediaStorageManager:
             logger.error(f"Failed to save locally: {e}")
             return {'success': False, 'error': 'Local storage failed'}
         
-        # GLOBAL PATH FIX: Prepend 'media/' so Node.js (serving from 'uploads/') finds it correctly
-        # This string is stored in MongoDB 'path' field.
-        file_id = f"media/{user_id}/{media_type}/{date_folder}/{filename}"
+        # GLOBAL PATH FIX: Prepend 'uploads/media/' so Node.js (serving from 'uploads/') 
+        # finds it correctly in the filesystem when using these DB paths.
+        file_id = f"uploads/media/{user_id}/{media_type}/{date_folder}/{filename}"
         
         # Store in cloud backends
         backends_stored = []
@@ -442,8 +431,9 @@ def extend_backends_for_media():
     # Add methods to S3Backend
     def s3_store_media(self, file_path: str, file_id: str) -> bool:
         try:
-            if hasattr(self, 's3') and hasattr(self, 'bucket'):
-                self.s3.upload_file(file_path, self.bucket, f"media/{file_id}")
+            if self.s3_client:
+                bucket = self.backend.config.get('bucket')
+                self.s3_client.upload_file(file_path, bucket, f"media/{file_id}")
                 return True
             return False
         except Exception as e:
@@ -452,8 +442,9 @@ def extend_backends_for_media():
             
     def s3_get_media(self, file_id: str) -> Optional[bytes]:
         try:
-            if hasattr(self, 's3') and hasattr(self, 'bucket'):
-                response = self.s3.get_object(Bucket=self.bucket, Key=f"media/{file_id}")
+            if self.s3_client:
+                bucket = self.backend.config.get('bucket')
+                response = self.s3_client.get_object(Bucket=bucket, Key=f"media/{file_id}")
                 return response['Body'].read()
             return None
         except Exception as e:
@@ -462,8 +453,9 @@ def extend_backends_for_media():
             
     def s3_delete_media(self, file_id: str) -> bool:
         try:
-            if hasattr(self, 's3') and hasattr(self, 'bucket'):
-                self.s3.delete_object(Bucket=self.bucket, Key=f"media/{file_id}")
+            if self.s3_client:
+                bucket = self.backend.config.get('bucket')
+                self.s3_client.delete_object(Bucket=bucket, Key=f"media/{file_id}")
                 return True
             return False
         except Exception as e:
@@ -474,6 +466,98 @@ def extend_backends_for_media():
     S3Backend.get_media = s3_get_media
     S3Backend.delete_media = s3_delete_media
     
+    # Add methods to GoogleDriveBackend
+    def drive_store_media(self, file_path: str, file_id: str) -> bool:
+        try:
+            if self.service:
+                from googleapiclient.http import MediaFileUpload
+                folder_id = self.backend.config.get('folder_id')
+                file_metadata = {'name': f"media_{file_id.replace('/', '_')}"}
+                if folder_id:
+                    file_metadata['parents'] = [folder_id]
+                
+                media = MediaFileUpload(file_path, resumable=True)
+                self.service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Google Drive store_media failed: {e}")
+            return False
+
+    def drive_get_media(self, file_id: str) -> Optional[bytes]:
+        try:
+            if self.service:
+                # Search for the file by name
+                name = f"media_{file_id.replace('/', '_')}"
+                results = self.service.files().list(q=f"name='{name}' and trashed=false", fields="files(id)").execute()
+                files = results.get('files', [])
+                if not files: return None
+                
+                drive_file_id = files[0]['id']
+                return self.service.files().get_media(fileId=drive_file_id).execute()
+            return None
+        except Exception as e:
+            logger.error(f"Google Drive get_media failed: {e}")
+            return None
+
+    def drive_delete_media(self, file_id: str) -> bool:
+        try:
+            if self.service:
+                name = f"media_{file_id.replace('/', '_')}"
+                results = self.service.files().list(q=f"name='{name}' and trashed=false", fields="files(id)").execute()
+                for f in results.get('files', []):
+                    self.service.files().delete(fileId=f['id']).execute()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Google Drive delete_media failed: {e}")
+            return False
+
+    GoogleDriveBackend.store_media = drive_store_media
+    GoogleDriveBackend.get_media = drive_get_media
+    GoogleDriveBackend.delete_media = drive_delete_media
+
+    # Add methods to AzureBlobBackend
+    def azure_store_media(self, file_path: str, file_id: str) -> bool:
+        try:
+            if self.client:
+                container = self.backend.config.get('container', 'media')
+                blob_client = self.client.get_blob_client(container=container, blob=f"media/{file_id}")
+                with open(file_path, "rb") as data:
+                    blob_client.upload_blob(data, overwrite=True)
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Azure store_media failed: {e}")
+            return False
+
+    def azure_get_media(self, file_id: str) -> Optional[bytes]:
+        try:
+            if self.client:
+                container = self.backend.config.get('container', 'media')
+                blob_client = self.client.get_blob_client(container=container, blob=f"media/{file_id}")
+                return blob_client.download_blob().readall()
+            return None
+        except Exception as e:
+            logger.error(f"Azure get_media failed: {e}")
+            return None
+
+    def azure_delete_media(self, file_id: str) -> bool:
+        try:
+            if self.client:
+                container = self.backend.config.get('container', 'media')
+                blob_client = self.client.get_blob_client(container=container, blob=f"media/{file_id}")
+                blob_client.delete_blob()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Azure delete_media failed: {e}")
+            return False
+
+    AzureBlobBackend.store_media = azure_store_media
+    AzureBlobBackend.get_media = azure_get_media
+    AzureBlobBackend.delete_media = azure_delete_media
+
     # Cloudinary extensions
     from storage_manager import CloudinaryBackend
     def cloudinary_store_media(self, file_path: str, file_id: str) -> bool:
@@ -518,9 +602,6 @@ def extend_backends_for_media():
     CloudinaryBackend.store_media = cloudinary_store_media
     CloudinaryBackend.get_media = cloudinary_get_media
     CloudinaryBackend.delete_media = cloudinary_delete_media
-
-    # TODO: Similar extensions for GoogleDriveBackend and AzureBlobBackend
-    # should be implemented matching their specific SDKs used in storage_manager.py
 
 
 # Global manager instance

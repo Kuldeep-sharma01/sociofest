@@ -190,8 +190,9 @@ class StableDiffusionService:
             import time
             filename = f"generated_{int(time.time())}.png"
         
-        output_dir = Path(__file__).parent / 'generated_images'
-        output_dir.mkdir(exist_ok=True)
+        # ✅ PERSISTENCE FIX: Store directly in server repo for consistency (ai subfolder)
+        output_dir = Path(__file__).parent / '..' / 'server' / 'uploads' / 'ai'
+        output_dir.mkdir(exist_ok=True, parents=True)
         
         filepath = output_dir / filename
         image.save(filepath)

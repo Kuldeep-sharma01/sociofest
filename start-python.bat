@@ -1,6 +1,6 @@
 @echo off
 echo 🐍 Starting SocioFest Python AI Service...
-cd server/python_modules
+cd python_modules
 if not exist "venv\" (
   echo Creating Virtual Environment...
   call python -m venv venv

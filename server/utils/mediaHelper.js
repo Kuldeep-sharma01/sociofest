@@ -291,6 +291,7 @@ export const processUpload = async (file, folderName = "") => {
         const manifest = {
           subtitles: [],
           audioTracks: [],
+          hasHls: config.enableHls === true,
           isDolbyVision: isAnyDolbyVision && !isProblematicDolbyVision,
         };
 
@@ -372,7 +373,7 @@ export const processUpload = async (file, folderName = "") => {
         await fs
           .writeFile(
             path.join(baseDir, `${baseName}_manifest.json`),
-            JSON.stringify({ subtitles: [], audioTracks: [] }),
+            JSON.stringify({ subtitles: [], audioTracks: [], hasHls: false }),
           )
           .catch(() => { });
       }
@@ -560,7 +561,7 @@ export const processUpload = async (file, folderName = "") => {
           console.log(`[FFMPEG] Resolution generation complete for ${baseName}!`);
         } else {
           // Minimal manifest for simple MP4
-          let currentManifest = { subtitles: [], audioTracks: [], resolutions: [] };
+          let currentManifest = { subtitles: [], audioTracks: [], resolutions: [], hasHls: false };
           try {
             const manifestContent = await fs.readFile(path.join(baseDir, `${baseName}_manifest.json`), "utf-8");
             currentManifest = { ...currentManifest, ...JSON.parse(manifestContent) };

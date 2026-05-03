@@ -39,7 +39,7 @@
         "enabled": true,
         "priority": 1,
         "config": {
-          "path": "../uploads/media"
+          "path": "../server/uploads/media"
         }
       },
       {

@@ -88,6 +88,9 @@ const UniversalVideoPlayer = forwardRef(({
       video.controls = true;
       video.addEventListener("error", handleError);
       
+      // ✅ Baseline: Load original MP4 immediately to prevent blank screen while fetching manifest
+      video.src = url;
+
       // 1. Try to load manifest for advanced features
       if (manifestUrl) {
         try {
@@ -105,7 +108,7 @@ const UniversalVideoPlayer = forwardRef(({
         video.src = url;
       } else {
         // If we have HLS and it's supported, use it for adaptive bitrate
-        if (hlsUrl) {
+        if (hlsUrl && manifest?.hasHls) {
           if (video.canPlayType("application/vnd.apple.mpegurl")) {
             video.src = hlsUrl;
           } else {

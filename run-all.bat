@@ -120,8 +120,8 @@ REM Frontend
 start "Frontend" /min cmd /k "cd client && npm run dev"
 
 REM Python AI APIs
-start "Voice AI" /min cmd /k "cd server/python_modules && call venv\Scripts\activate.bat && python -m uvicorn custom_ai_api:app --host 0.0.0.0 --port 8000"
-start "Face API" /min cmd /k "cd server/python_modules && call venv\Scripts\activate.bat && python -m waitress --listen=0.0.0.0:5001 app:app"
+start "Voice AI" /min cmd /k "cd python_modules && call venv\Scripts\activate.bat && python -m uvicorn custom_ai_api:app --host 0.0.0.0 --port 8000"
+start "Face API" /min cmd /k "cd python_modules && call venv\Scripts\activate.bat && python -m waitress --listen=0.0.0.0:5001 app:app"
 
 REM Stable Diffusion (if folder exists)
 if exist "stable-diffusion-webui" (

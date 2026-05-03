@@ -15,8 +15,8 @@ temp/
 .env.*
 !.env.example
 
-server/python_modules/model_cache/
-server/python_modules/__pycache__/
+python_modules/model_cache/
+python_modules/__pycache__/
 *.pyc
 
 .DS_Store
@@ -41,9 +41,9 @@ server/.env.*
 client/.env
 client/.env.*
 !client/.env.example
-server/python_modules/.env
-server/python_modules/.env.*
-!server/python_modules/.env.example
+python_modules/.env
+python_modules/.env.*
+!python_modules/.env.example
 
 logs/
 *.log
@@ -65,11 +65,11 @@ out/
 coverage/
 *.lcov
 
-server/python_modules/__pycache__/
-server/python_modules/*.pyc
-server/python_modules/venv/
-server/python_modules/.venv/
-server/python_modules/generated_certificates/
+python_modules/__pycache__/
+python_modules/*.pyc
+python_modules/venv/
+python_modules/.venv/
+python_modules/generated_certificates/
 
 server/uploads/
 uploads/

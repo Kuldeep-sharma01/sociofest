@@ -235,7 +235,7 @@ Visit `https://sociofest-backend.onrender.com/health` — you should see:
 | **Name** | `sociofest-python` |
 | **Region** | Same as your Atlas cluster |
 | **Branch** | `main` |
-| **Root Directory** | `server/python_modules` |
+| **Root Directory** | `python_modules` |
 | **Runtime** | `Docker` |
 | **Dockerfile Path** | `./Dockerfile` |
 | **Instance Type** | **Free** |
@@ -265,7 +265,7 @@ PORT=5001
 ### 4.4 — Deploy
 
 Click **"Create Web Service"**. Render will:
-1. Build the Docker image from `server/python_modules/Dockerfile`
+1. Build the Docker image from `python_modules/Dockerfile`
 2. Download TensorFlow model (~100 MB on first start)
 3. Your Python URL will be: `https://sociofest-python.onrender.com`
 

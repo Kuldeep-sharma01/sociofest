@@ -52,7 +52,7 @@ def background_generate(app, task_id, prompt, negative_prompt, num_steps, guidan
             response = {}
             if save:
                 filename = service.save_image(image)
-                response['imageUrl'] = f"/python-api/sd-api/generated/{filename}"
+                response['imageUrl'] = f"/uploads/ai/{filename}"
                 
             if return_base64:
                 response['image_base64'] = service.image_to_base64(image)
@@ -242,5 +242,5 @@ def serve_generated_image(filename):
     """Serve generated image securely"""
     if not re.match(r'^[\w\-]+\.(png|jpg|webp)$', filename):
         return jsonify({'error': 'Invalid filename'}), 400
-    output_dir = os.path.join(os.path.dirname(__file__), 'generated_images')
+    output_dir = os.path.join(os.path.dirname(__file__), '..', 'server', 'uploads', 'ai')
     return send_from_directory(output_dir, filename)

@@ -28,7 +28,7 @@ echo
 # --- Fallback logic: Ensure environment variables exist ---
 [ ! -f "server/.env" ] && cp server/.env.example server/.env && echo "Created server/.env"
 [ ! -f "client/.env" ] && cp client/.env.example client/.env && echo "Created client/.env"
-[ ! -f "server/python_modules/.env" ] && cp server/python_modules/.env.example server/python_modules/.env && echo "Created python/.env"
+[ ! -f "python_modules/.env" ] && cp python_modules/.env.example python_modules/.env && echo "Created python/.env"
 
 # --- Smart Dependency Check Fallback ---
 [ ! -d "node_modules" ] && npm install
@@ -46,10 +46,10 @@ npm run server &
 (cd client && npm run dev) &
 
 # Terminal 4: Voice AI
-(cd server/python_modules && pip install --upgrade pip wheel && pip install --use-deprecated=legacy-resolver -r requirements.txt && uvicorn custom_ai_api:app --host 0.0.0.0 --port 8000 --reload) &
+(cd python_modules && pip install --upgrade pip wheel && pip install --use-deprecated=legacy-resolver -r requirements.txt && uvicorn custom_ai_api:app --host 0.0.0.0 --port 8000 --reload) &
 
 # Terminal 5: Face Rec
-(cd server/python_modules && python app.py) &
+(cd python_modules && python app.py) &
 
 # Terminal 6: Stable Diffusion
 if [ -d "stable-diffusion-webui" ]; then

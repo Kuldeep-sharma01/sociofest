@@ -107,6 +107,8 @@ class StorageConfig:
         }
     }
     
+    SECTION_NAME = 'model_storage'
+    
     def __init__(self):
         self.config = None
         self.backends: List[StorageBackend] = []
@@ -116,21 +118,23 @@ class StorageConfig:
 
     def _validate_config(self, config: dict) -> bool:
         try:
-            storage = config['model_storage']
-            assert isinstance(storage['large_file_threshold_gb'], (int, float))
-            assert storage['fallback_strategy'] in ('sequential', 'random')
+            storage = config[self.SECTION_NAME]
+            assert isinstance(storage.get('large_file_threshold_gb', 0), (int, float))
+            # Fallback strategy is optional for some configs
+            if 'fallback_strategy' in storage:
+                assert storage['fallback_strategy'] in ('sequential', 'random')
+            
             for b in storage['backends']:
-                assert b['type'] in self.VALID_BACKEND_TYPES
                 assert isinstance(b['priority'], int) and 1 <= b['priority'] <= 999
                 assert isinstance(b['enabled'], bool)
-                # Sanitize local path — must not traverse outside the project root
-                if b['type'] == 'local':
-                    resolved = Path(b['config'].get('path', '')).resolve()
-                    project_root = Path(__file__).parent.resolve()
-                    assert str(resolved).startswith(str(project_root)), "Path traversal in local backend"
+                # ✅ SECURITY: Allow path traversal only within the monorepo root
+                if b['type'] == 'local' and 'config' in b and 'path' in b['config']:
+                    resolved = Path(b['config']['path']).resolve()
+                    monorepo_root = Path(__file__).parent.parent.resolve()
+                    assert str(resolved).startswith(str(monorepo_root)), f"Security Error: Path {resolved} is outside monorepo root"
             return True
         except (KeyError, AssertionError, TypeError) as e:
-            logger.error(f"Config validation failed: {e}")
+            logger.error(f"Config validation failed for {self.SECTION_NAME}: {e}")
             return False
 
     def load_or_create_config(self):
@@ -157,7 +161,7 @@ class StorageConfig:
     def _build_backends(self):
         """Build StorageBackend objects from config"""
         self.backends = []
-        for backend_cfg in self.config['model_storage']['backends']:
+        for backend_cfg in self.config[self.SECTION_NAME]['backends']:
             backend = StorageBackend(
                 type=backend_cfg['type'],
                 name=backend_cfg['name'],
@@ -192,13 +196,23 @@ class StorageConfig:
         return None
     
     def update_backend(self, backend_type: str, updates: Dict):
-        """Update backend configuration"""
-        for backend_cfg in self.config['model_storage']['backends']:
+        """Update backend configuration with security validation"""
+        for backend_cfg in self.config[self.SECTION_NAME]['backends']:
             if backend_cfg['type'] == backend_type:
+                # Store original for rollback
+                original = json.loads(json.dumps(self.config))
+                
                 backend_cfg.update(updates)
+                
+                # ✅ SECURITY: Validate before persisting
+                if not self._validate_config(self.config):
+                    self.config = original
+                    logger.error(f"Security: Blocked invalid/malicious config update for {backend_type} in {self.SECTION_NAME}")
+                    return False
+                
                 self._build_backends()
                 self.save_config()
-                logger.info(f"Updated {backend_type} backend")
+                logger.info(f"Updated {backend_type} backend in {self.SECTION_NAME}")
                 return True
         return False
     

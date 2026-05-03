@@ -86,7 +86,7 @@ if not exist "server\node_modules\" (
     call npm install --prefix server
 )
 
-cd server/python_modules
+cd python_modules
 if not exist "venv\" (
   echo Creating Python Virtual Environment [venv]...
   call python -m venv venv
@@ -132,11 +132,11 @@ start "Frontend" cmd /k "cd client && npm run dev"
 
 REM 4. Start Voice AI (TTS/STT/XTTS)
 echo Starting voice AI...
-start "Voice-AI" cmd /k "cd server/python_modules && call venv\Scripts\activate.bat && python -m uvicorn custom_ai_api:app --host 0.0.0.0 --port 8000"
+start "Voice-AI" cmd /k "cd python_modules && call venv\Scripts\activate.bat && python -m uvicorn custom_ai_api:app --host 0.0.0.0 --port 8000"
 
 REM 5. Start Face Recognition Python (Flask)
 echo Starting face recognition service...
-start "Face-Rec" cmd /k "cd server/python_modules && call venv\Scripts\activate.bat && python -m waitress --listen=0.0.0.0:5001 app:app"
+start "Face-Rec" cmd /k "cd python_modules && call venv\Scripts\activate.bat && python -m waitress --listen=0.0.0.0:5001 app:app"
 
 REM 6. Start Stable Diffusion
 if exist "stable-diffusion-webui\" (

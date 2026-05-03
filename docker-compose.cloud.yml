@@ -41,7 +41,7 @@ services:
       - redis_password
 
   python-service:
-    build: ./server/python_modules
+    build: ./python_modules
     container_name: sociofest-python
     environment:
       - MONGODB_URI=${MONGODB_URI}
@@ -58,7 +58,7 @@ services:
   # Voice AI — optional, enable with: --profile voice
   voice-ai:
     build:
-      context: ./server/python_modules
+      context: ./python_modules
       dockerfile: Dockerfile.voice
     container_name: sociofest-voice
     profiles:

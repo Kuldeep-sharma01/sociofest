@@ -45,12 +45,12 @@ services:
       retries: 3
 
   python-service:
-    build: ./server/python_modules
+    build: ./python_modules
     container_name: sociofest-python
     ports:
       - "5001:5001"
     env_file:
-      - ./server/python_modules/.env
+      - ./python_modules/.env
     environment:
       - MONGODB_URI=mongodb://mongodb:27017/sociofestdb #
     volumes:
@@ -69,7 +69,7 @@ services:
   #   docker compose -f docker-compose.full.yml --profile voice up -d
   voice-ai:
     build:
-      context: ./server/python_modules
+      context: ./python_modules
       dockerfile: Dockerfile.voice
     container_name: sociofest-voice-ai
     profiles:
