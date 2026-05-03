@@ -418,16 +418,20 @@ export const processUpload = async (file, folderName = "") => {
           await fs.mkdir(hlsDir, { recursive: true }).catch(() => { });
           const hlsPlaylistPath = path.join(hlsDir, "master.m3u8");
 
+          const safeNewPath = newPath.replace(/\\/g, "/");
+
           try {
             if (!isSafeForCopy)
               throw new Error("Format requires transcoding for web streaming.");
+            
             await trackedExecFileAsync(
               "ffmpeg",
               [
-                "-v", "error", "-y", "-i", newPath, "-map", "0:v:0", "-map", "0:a:0?",
+                "-v", "error", "-y", "-i", safeNewPath, "-map", "0:v:0", "-map", "0:a:0?",
                 "-c", "copy", "-f", "hls", "-hls_time", "4", "-hls_playlist_type", "vod",
                 "-hls_segment_type", "mpegts",
-                "-hls_segment_filename", `${hlsDir}/chunk_%03d.ts`, hlsPlaylistPath
+                "-hls_segment_filename", path.join(hlsDir, "chunk_%03d.ts").replace(/\\/g, "/"),
+                hlsPlaylistPath.replace(/\\/g, "/")
               ],
               { timeout: config.timeout, maxBuffer: config.maxBuffer },
             );
@@ -435,11 +439,12 @@ export const processUpload = async (file, folderName = "") => {
             await trackedExecFileAsync(
               "ffmpeg",
               [
-                "-v", "error", "-y", "-i", newPath, "-map", "0:v:0", "-map", "0:a:0?",
+                "-v", "error", "-y", "-i", safeNewPath, "-map", "0:v:0", "-map", "0:a:0?",
                 "-c:v", "libx264", "-preset", safePreset, "-crf", String(safeCrf), "-pix_fmt", "yuv420p",
                 "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-f", "hls", "-hls_time", "4",
                 "-hls_playlist_type", "vod", "-hls_segment_type", "mpegts",
-                "-hls_segment_filename", `${hlsDir}/chunk_%03d.ts`, hlsPlaylistPath
+                "-hls_segment_filename", path.join(hlsDir, "chunk_%03d.ts").replace(/\\/g, "/"),
+                hlsPlaylistPath.replace(/\\/g, "/")
               ],
               { timeout: config.timeout, maxBuffer: config.maxBuffer },
             );

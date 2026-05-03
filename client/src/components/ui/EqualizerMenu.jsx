@@ -58,7 +58,7 @@ const EqualizerMenu = ({
               onClick={() => applyEqPreset(key)}
               className={`px-2 py-1 text-[10px] font-semibold rounded-md border transition-colors ${
                 activeEqPreset === key
-                  ? 'bg-current text-black border-current shadow-sm'
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
                   : 'bg-transparent opacity-80 border-inherit/30 hover:bg-white/10 text-inherit'
               }`}
             >
@@ -69,7 +69,7 @@ const EqualizerMenu = ({
             onClick={() => setActiveEqPreset('custom')}
             className={`px-2 py-1 text-[10px] font-semibold rounded-md border transition-colors ${
               activeEqPreset === 'custom'
-                ? 'bg-current text-black border-current shadow-sm'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
                 : 'bg-transparent opacity-80 border-inherit/30 hover:bg-white/10 text-inherit'
             }`}
           >

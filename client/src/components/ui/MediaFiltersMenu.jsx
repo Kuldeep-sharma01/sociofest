@@ -125,14 +125,14 @@ Output ONLY the JSON object, absolutely no markdown formatting, no backticks, an
       </div>
       <div className="flex flex-wrap gap-2 mb-4">
         {Object.entries(FILTER_PRESETS).map(([key, preset]) => (
-          <button key={key} onClick={() => applyPreset(key)} className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${activePreset === key && !showCustomFilters && !showAiFilters ? 'bg-current text-black border-current shadow-sm' : 'bg-transparent opacity-80 border-inherit/30 hover:bg-white/10'}`}>
+          <button key={key} onClick={() => applyPreset(key)} className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${activePreset === key && !showCustomFilters && !showAiFilters ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-transparent opacity-80 border-inherit/30 hover:bg-white/10'}`}>
             {preset.name}
           </button>
         ))}
-        <button onClick={() => { setShowCustomFilters(true); setShowAiFilters(false); setActivePreset('custom'); }} className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${showCustomFilters ? 'bg-current text-black border-current shadow-sm' : 'bg-transparent opacity-80 border-inherit/30 hover:bg-white/10'}`}>
+        <button onClick={() => { setShowCustomFilters(true); setShowAiFilters(false); setActivePreset('custom'); }} className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${showCustomFilters ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-transparent opacity-80 border-inherit/30 hover:bg-white/10'}`}>
           Custom
         </button>
-        <button onClick={() => { setShowAiFilters(true); setShowCustomFilters(false); setActivePreset('ai_custom'); }} className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors flex items-center gap-1 ${showAiFilters ? 'bg-current text-black border-current shadow-sm' : 'bg-transparent opacity-80 border-inherit/30 hover:bg-white/10'}`}>
+        <button onClick={() => { setShowAiFilters(true); setShowCustomFilters(false); setActivePreset('ai_custom'); }} className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors flex items-center gap-1 ${showAiFilters ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-transparent opacity-80 border-inherit/30 hover:bg-white/10'}`}>
           <Sparkles className="w-3 h-3"/> AI Grade
         </button>
       </div>

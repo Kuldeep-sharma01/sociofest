@@ -62,7 +62,7 @@ const TrackSelectionMenu = ({
             <div className="flex flex-col gap-1">
               <button
                 onClick={() => handleResolutionChange(-1)}
-                className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors border border-transparent ${activeResolution === -1 ? 'bg-current text-black font-bold shadow-sm' : 'opacity-80 hover:bg-white/10 hover:border-inherit/30'}`}
+                className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors border border-transparent ${activeResolution === -1 ? 'bg-blue-600 text-white font-bold shadow-sm' : 'opacity-80 hover:bg-white/10 hover:border-inherit/30'}`}
               >
                 Auto / Original
               </button>
@@ -70,7 +70,7 @@ const TrackSelectionMenu = ({
                 <button
                   key={`res-${idx}`}
                   onClick={() => handleResolutionChange(idx)}
-                  className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors border border-transparent ${activeResolution === idx ? 'bg-current text-black font-bold shadow-sm' : 'opacity-80 hover:bg-white/10 hover:border-inherit/30'}`}
+                  className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors border border-transparent ${activeResolution === idx ? 'bg-blue-600 text-white font-bold shadow-sm' : 'opacity-80 hover:bg-white/10 hover:border-inherit/30'}`}
                 >
                   {res.label} ({res.height}p)
                 </button>
@@ -89,7 +89,7 @@ const TrackSelectionMenu = ({
                 <button
                   key={`audio-${idx}`}
                   onClick={() => handleAudioTrackChange(idx)}
-                  className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors border border-transparent ${activeAudioTrack === idx ? 'bg-current text-black font-bold shadow-sm' : 'opacity-80 hover:bg-white/10 hover:border-inherit/30'}`}
+                  className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors border border-transparent ${activeAudioTrack === idx ? 'bg-blue-600 text-white font-bold shadow-sm' : 'opacity-80 hover:bg-white/10 hover:border-inherit/30'}`}
                 >
                   {track.label}
                 </button>
@@ -104,11 +104,11 @@ const TrackSelectionMenu = ({
             <Subtitles className="w-3 h-3" /> Subtitles
           </h4>
           <div className="flex flex-col gap-1">
-            <button onClick={() => handleTextTrackChange(-1)} className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors border border-transparent ${activeTextTrack === -1 ? 'bg-current text-black font-bold shadow-sm' : 'opacity-80 hover:bg-white/10 hover:border-inherit/30'}`}>
+            <button onClick={() => handleTextTrackChange(-1)} className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors border border-transparent ${activeTextTrack === -1 ? 'bg-blue-600 text-white font-bold shadow-sm' : 'opacity-80 hover:bg-white/10 hover:border-inherit/30'}`}>
               None (Off)
             </button>
             {textTracks.map((track, idx) => (
-              <button key={`text-${idx}`} onClick={() => handleTextTrackChange(idx)} className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors border border-transparent ${activeTextTrack === idx ? 'bg-current text-black font-bold shadow-sm' : 'opacity-80 hover:bg-white/10 hover:border-inherit/30'}`}>
+              <button key={`text-${idx}`} onClick={() => handleTextTrackChange(idx)} className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors border border-transparent ${activeTextTrack === idx ? 'bg-blue-600 text-white font-bold shadow-sm' : 'opacity-80 hover:bg-white/10 hover:border-inherit/30'}`}>
                 {track.label}
               </button>
             ))}

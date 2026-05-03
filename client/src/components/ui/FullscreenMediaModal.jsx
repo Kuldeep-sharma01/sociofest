@@ -1952,95 +1952,88 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
     }
   };
 
-  // Auto-detect backend extracted multi-track subtitles & audio
+  // Unified AI Asset & Metadata Detection Engine
   useEffect(() => {
     if (media?.type === "video" && safeUrl && !isEmbed) {
-      const defaultAudio = [{ url: null, label: "Original Video Audio" }];
-      const manifestUrl = safeUrl.replace(/\.[^/.]+$/, "_manifest.json");
-      fetchJsonResource(manifestUrl)
-        .then((data) => {
+      const loadMetadata = async () => {
+        // 1. Try to load the official _manifest.json first
+        const manifestUrl = safeUrl.replace(/\.[^/.]+$/, "_manifest.json");
+        try {
+          const data = await fetchJsonResource(manifestUrl);
           setIsNativeDolbyVision(!!data.isDolbyVision);
+          
           if (data.subtitles?.length > 0) {
-            setTextTracks(
-              data.subtitles.map((s) => ({
-                ...s,
-                url:
-                  s.url.startsWith("http") || s.url.startsWith("blob:")
-                    ? s.url
-                    : new URL(
-                      s.url,
-                      safeUrl.startsWith("http")
-                        ? safeUrl
-                        : window.location.origin,
-                    ).href,
-              })),
-            );
-            window.dispatchEvent(
-              new CustomEvent("showToast", {
-                detail: "Multiple subtitles loaded! 💬",
-              }),
-            );
+            setTextTracks(data.subtitles.map(s => ({
+              ...s,
+              url: s.url.startsWith("http") || s.url.startsWith("blob:") ? s.url : new URL(s.url, window.location.origin).href
+            })));
           }
+
+          const defaultAudio = { url: null, label: "Original Audio", id: 0 };
           if (data.audioTracks?.length > 0) {
-            const mappedTracks = data.audioTracks.map((t) => ({
+            const mappedTracks = data.audioTracks.map((t, idx) => ({
               ...t,
-              url:
-                t.url.startsWith("http") || t.url.startsWith("blob:")
-                  ? t.url
-                  : new URL(
-                    t.url,
-                    safeUrl.startsWith("http")
-                      ? safeUrl
-                      : window.location.origin,
-                  ).href,
+              id: idx + 1,
+              url: t.url.startsWith("http") || t.url.startsWith("blob:") ? t.url : new URL(t.url, window.location.origin).href
             }));
-            setAudioTracks([
-              { url: null, label: "Original Video Audio" },
-              ...mappedTracks,
-            ]);
-            setActiveAudioTrack(0);
-            window.dispatchEvent(
-              new CustomEvent("showToast", {
-                detail: "Multiple audio tracks loaded! 🎵",
-              }),
-            );
+            setAudioTracks([defaultAudio, ...mappedTracks]);
           } else {
-            setAudioTracks(defaultAudio);
-            setActiveAudioTrack(0);
+            setAudioTracks([defaultAudio]);
           }
 
           if (data.resolutions?.length > 0) {
-            const mappedRes = data.resolutions.map((r) => ({
+            setResolutions(data.resolutions.map(r => ({
               ...r,
-              url:
-                r.url.startsWith("http") || r.url.startsWith("blob:")
-                  ? r.url
-                  : new URL(
-                    r.url,
-                    safeUrl.startsWith("http")
-                      ? safeUrl
-                      : window.location.origin,
-                  ).href,
-            }));
-            setResolutions(mappedRes);
+              url: r.url.startsWith("http") || r.url.startsWith("blob:") ? r.url : new URL(r.url, window.location.origin).href
+            })));
           }
-        })
-        .catch(() => {
-          // Fallback to old single extraction guess
-          const guessedUrl = safeUrl.replace(/\.[^/.]+$/, ".vtt");
-          fetchResource(guessedUrl, { method: "HEAD" })
-            .then((res) => {
-              if (res.ok) {
-                setTextTracks([
-                  { url: guessedUrl, label: "Extracted Subtitle" },
-                ]);
-              }
-            })
-            .catch(() => { });
+          return; // Manifest found and loaded, skip fallback detection
+        } catch (err) {
+          // console.debug("Manifest not found, falling back to smart detection...");
+        }
 
-          setAudioTracks(defaultAudio);
-          setActiveAudioTrack(0);
-        });
+        // 2. Fallback: Smart Detection of common AI sidecar files
+        const baseNoExt = safeUrl.replace(/\.[^/.]+$/, "");
+        const detectionTargets = {
+          subtitles: [
+            { url: `${baseNoExt}.vtt`, label: "Subtitles" },
+            { url: `${baseNoExt}_scripture.vtt`, label: "Scripture (AI)" },
+            { url: `${baseNoExt}_transcription.vtt`, label: "Transcription (AI)" },
+            { url: `${baseNoExt}_translated_en.vtt`, label: "Scripture (English)" },
+            { url: `${baseNoExt}_translated_hi.vtt`, label: "Scripture (Hindi)" },
+          ],
+          audio: [
+            { url: `${baseNoExt}_dub_en.wav`, label: "AI Dub (English)" },
+            { url: `${baseNoExt}_dub_hi.wav`, label: "AI Dub (Hindi)" },
+            { url: `${baseNoExt}_dub_es.wav`, label: "AI Dub (Spanish)" },
+          ]
+        };
+
+        const foundText = [];
+        const foundAudio = [{ url: null, label: "Original Audio", id: 0 }];
+
+        const probePromises = [
+          ...detectionTargets.subtitles.map(async (t) => {
+             try {
+               const res = await fetchResource(t.url, { method: "HEAD" });
+               if (res.ok) foundText.push(t);
+             } catch (e) {}
+          }),
+          ...detectionTargets.audio.map(async (t) => {
+             try {
+               const res = await fetchResource(t.url, { method: "HEAD" });
+               if (res.ok) foundAudio.push({ ...t, id: foundAudio.length });
+             } catch (e) {}
+          })
+        ];
+
+        await Promise.all(probePromises);
+        if (foundText.length > 0) setTextTracks(foundText);
+        setAudioTracks(foundAudio);
+        setActiveAudioTrack(0);
+      };
+
+      loadMetadata();
     }
   }, [safeUrl, media, isEmbed]);
 
@@ -2270,48 +2263,67 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
 
     const initHls = async () => {
       if (!hlsUrl) return;
+      
+      // Native HLS Support (Safari/iOS)
       if (video.canPlayType("application/vnd.apple.mpegurl")) {
         video.src = hlsUrl;
-        video.addEventListener(
-          "error",
-          () => {
-            if (video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE)
-              video.src = optUrl;
-          },
-          { once: true },
-        );
-      } else {
-        try {
-          const Hls = await (async () => {
-            if (window.Hls) return window.Hls;
-            return new Promise((res) => {
-              const s = document.createElement("script");
-              s.src = "https://cdn.jsdelivr.net/npm/hls.js@latest";
-              s.onload = () => res(window.Hls);
-              document.head.appendChild(s);
-            });
-          })();
+        return;
+      } 
+      
+      // HLS.js for Chrome/Firefox/Edge
+      try {
+        const Hls = await (async () => {
+          if (window.Hls) return window.Hls;
+          return new Promise((res) => {
+            const s = document.createElement("script");
+            s.src = "https://cdn.jsdelivr.net/npm/hls.js@latest";
+            s.onload = () => res(window.Hls);
+            document.head.appendChild(s);
+          });
+        })();
 
-          if (Hls.isSupported()) {
-            hlsInstance = new Hls({ maxMaxBufferLength: 60 });
-            hlsInstance.loadSource(hlsUrl);
-            hlsInstance.attachMedia(video);
-            hlsInstance.on(Hls.Events.ERROR, (event, data) => {
-              if (data.fatal) {
-                hlsInstance.destroy();
-                hlsInstance = null;
-                video.__hlsInstance = null;
-                video.src = optUrl;
-              }
-            });
-            video.__hlsInstance = hlsInstance;
-          }
-        } catch (e) {
+        if (Hls.isSupported()) {
+          if (video.__hlsInstance) video.__hlsInstance.destroy();
+          
+          hlsInstance = new Hls({ 
+            maxMaxBufferLength: 60,
+            enableWorker: true,
+            lowLatencyMode: true
+          });
+          
+          hlsInstance.loadSource(hlsUrl);
+          hlsInstance.attachMedia(video);
+          
+          hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+            if (data.fatal) {
+              console.warn("HLS Fatal Error, falling back to MP4:", data.type);
+              hlsInstance.destroy();
+              hlsInstance = null;
+              video.__hlsInstance = null;
+              video.src = optUrl;
+            }
+          });
+          
+          video.__hlsInstance = hlsInstance;
+        } else {
           video.src = optUrl;
         }
+      } catch (e) {
+        console.error("HLS Engine initialization failed:", e);
+        video.src = optUrl;
       }
     };
-    initHls();
+    
+    // Final check: Decide whether to use HLS or MP4 as the primary source
+    if (hlsUrl && !isLocalUpload) {
+       initHls();
+    } else if (isLocalUpload) {
+       // For local uploads, we try HLS first but don't wait for it if the MP4 is available
+       video.src = optUrl;
+       initHls();
+    } else {
+       video.src = optUrl;
+    }
 
     const handleTimeUpdate = () => {
       if (video.currentTime > 0.2 && !video.paused) {
@@ -2347,12 +2359,22 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
   }, [safeUrl, media, isEmbed]);
 
   if (!media) return null;
+  
+  const isFilterDefault = filters.brightness === 100 && 
+                          filters.contrast === 100 && 
+                          filters.saturate === 100 && 
+                          filters.sepia === 0 && 
+                          filters.hueRotate === 0 && 
+                          filters.blur === 0 && 
+                          filters.grayscale === 0 && 
+                          filters.invert === 0;
 
-  let activeFilter = `brightness(${filters.brightness}%) contrast(${filters.contrast}%) saturate(${filters.saturate}%) sepia(${filters.sepia}%) hue-rotate(${filters.hueRotate}deg) blur(${filters.blur}px) grayscale(${filters.grayscale || 0}%) invert(${filters.invert || 0}%)`;
+  let activeFilter = isFilterDefault ? null : `brightness(${filters.brightness}%) contrast(${filters.contrast}%) saturate(${filters.saturate}%) sepia(${filters.sepia}%) hue-rotate(${filters.hueRotate}deg) blur(${filters.blur}px) grayscale(${filters.grayscale || 0}%) invert(${filters.invert || 0}%)`;
+  
   if (useWebSafe) {
     activeFilter =
-      `hue-rotate(285deg) saturate(1.8) contrast(1.2) brightness(1.1) ` +
-      activeFilter;
+      `hue-rotate(285deg) saturate(1.8) contrast(1.2) brightness(1.1)` +
+      (activeFilter ? ` ${activeFilter}` : "");
   } else if (isVisionOn) {
     activeFilter = `brightness(${filters.brightness * 1.15}%) contrast(${filters.contrast * 1.15}%) saturate(${filters.saturate * 1.25}%) sepia(${filters.sepia}%) hue-rotate(${filters.hueRotate}deg) blur(${filters.blur}px) grayscale(${filters.grayscale || 0}%) invert(${filters.invert || 0}%)`;
   }
@@ -2873,12 +2895,36 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
     handleFlip("x");
   };
 
-  const handleTextTrackChange = (index) => {
+  const handleTextTrackChange = async (index) => {
     setActiveTextTrack(index);
     if (index === -1) {
       setSubtitleUrl(null);
     } else {
-      setSubtitleUrl(textTracks[index].url);
+      const track = textTracks[index];
+      setSubtitleUrl(track.url);
+
+      // If it's an AI-generated Scripture/Transcription, load it into the editor to enable dubbing
+      if (track.label.includes("Scripture") || track.label.includes("Transcription")) {
+        try {
+          const response = await fetchResource(track.url);
+          if (response.ok) {
+            const vttText = await response.text();
+            setTranslatedScript(vttText);
+            
+            // Auto-set target language if label has it, e.g., "Scripture (Hindi)"
+            const langMatch = track.label.match(/\(([^)]+)\)/);
+            if (langMatch) {
+              const detected = langMatch[1];
+              const VALID_LANGS = ["English", "Hindi", "Spanish", "French", "German", "Japanese", "Arabic"];
+              if (VALID_LANGS.includes(detected)) {
+                setTargetLang(detected);
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to auto-load track for dubbing:", err);
+        }
+      }
     }
   };
 
@@ -3075,6 +3121,7 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
         text: sourceText,
         sourceLanguage: sourceLang,
         targetLanguage: targetLang,
+        sourceAudioUrl: safeUrl,
       });
 
       setTranslatedScript(result.translatedVtt || result.translatedText);
@@ -4246,7 +4293,7 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
             <div
               style={{
                 transform: `translate(${position.x}px, ${position.y}px) scale(${scale}) scaleX(${flip.x}) scaleY(${flip.y}) rotate(${rotation}deg)`,
-                filter: activeFilter,
+                filter: activeFilter || undefined,
                 boxShadow: isVisionOn
                   ? "0 0 50px rgba(255, 255, 255, 0.15)"
                   : "none",
@@ -4257,13 +4304,16 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
                   aspectRatio !== "auto"
                     ? aspectRatio.replace("/", " / ")
                     : undefined,
-                width: isRotated ? "100dvh" : "100%",
-                height: isRotated ? "100dvw" : "100%",
+                width: isRotated ? "100vh" : "100vw",
+                height: isRotated ? "100vw" : "100vh",
+                maxWidth: "100%",
+                maxHeight: "100%",
               }}
               className={`relative shrink-0 flex items-center justify-center shadow-2xl bg-black overflow-hidden ${isLocked ? "pointer-events-none" : ""}`}
             >
               <video
                 ref={videoRef}
+                src={safeUrl && !safeUrl.includes(".m3u8") ? safeUrl : undefined}
                 poster={
                   safeUrl &&
                     !safeUrl.startsWith("blob:") &&
@@ -4278,6 +4328,16 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
                 }
                 draggable="false"
                 autoPlay={media?.isPlaying !== false}
+                playsInline
+                onError={(e) => {
+                  // Fallback for CORS issues - only for standard video files
+                  if (e.target.crossOrigin === "anonymous" && !safeUrl?.includes(".m3u8")) {
+                    console.warn("Media CORS fallback triggered for", safeUrl);
+                    e.target.crossOrigin = null;
+                    e.target.src = safeUrl;
+                    e.target.load();
+                  }
+                }}
                 onTimeUpdate={(e) => {
                   const t = e.target.currentTime;
                   setCurrentTime(t);
@@ -4338,7 +4398,14 @@ const FullscreenMediaModal = ({ media, onClose, currentUser }) => {
                     setIsPlaying(false);
                   }
                 }}
-                style={{ objectFit: objectFit }}
+                style={{ 
+                  objectFit: objectFit,
+                  display: "block",
+                  opacity: 1,
+                  visibility: "visible",
+                  width: "100%",
+                  height: "100%",
+                }}
                 className="custom-cue-video w-full h-full outline-none"
               >
                 {subtitleUrl && (

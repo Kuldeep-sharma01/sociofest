@@ -58,6 +58,7 @@ router.post("/transcribe", protect, upload.single("audio"), activityLoggerMiddle
  * @access  Private
  */
 router.post("/text-to-speech", protect, activityLoggerMiddleware('TEXT_TO_SPEECH'), textToSpeech);
+router.get("/text-to-speech", textToSpeech); // Public GET for direct audio streaming
 
 /**
  * Content Generation and Analysis

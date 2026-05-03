@@ -68,8 +68,9 @@ def get_whisper():
         try:
             import whisper
             device = os.getenv("AI_DEVICE", "cpu")
-            logger.info(f"Loading Speech-to-Text AI (Whisper) on {device}...")
-            whisper_model = whisper.load_model("base", device=device)
+            logger.info(f"Loading Speech-to-Text AI (Whisper: small) on {device}...")
+            # Upgrading to 'small' for better vocal understanding while maintaining speed
+            whisper_model = whisper.load_model("small", device=device)
         except Exception as e:
             logger.error(f"Whisper load failed: {e}")
             raise Exception("Whisper model unavailable")
@@ -110,6 +111,23 @@ def transcribe_audio():
     if safe_ext not in ALLOWED_AUDIO_EXTS:
         return jsonify({"error": "Unsupported audio format"}), 400
 
+    def isolate_vocals(input_p, output_p):
+        """Uses FFmpeg to isolate vocals and reduce background noise/music."""
+        try:
+            # highpass (removes low rumble), lowpass (removes high hiss), afftdn (FFT-based denoiser)
+            # pan (forces mono to center speech)
+            cmd = [
+                "ffmpeg", "-y", "-i", input_p,
+                "-af", "highpass=f=100,lowpass=f=7000,afftdn=nf=-20,pan=mono|c0=c0",
+                "-ar", "16000", # Whisper prefers 16kHz
+                output_p
+            ]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            return True
+        except Exception as e:
+            logger.warning(f"Vocal isolation failed: {e}. Proceeding with raw audio.")
+            return False
+
     safe_filename = f"{uuid.uuid4().hex}{safe_ext}"
     temp_dir = tempfile.mkdtemp()
     temp_path = os.path.join(temp_dir, safe_filename)
@@ -117,8 +135,15 @@ def transcribe_audio():
     try:
         file.save(temp_path)
 
+        # Pre-process for better vocal understanding
+        isolated_path = os.path.join(temp_dir, f"isolated_{safe_filename}.wav")
+        if isolate_vocals(temp_path, isolated_path):
+            transcribe_source = isolated_path
+        else:
+            transcribe_source = temp_path
+
         model = get_whisper()
-        result = model.transcribe(temp_path, fp16=False)
+        result = model.transcribe(transcribe_source, fp16=False)
         
         vtt_lines = ["WEBVTT\n"]
         for i, segment in enumerate(result["segments"]):
@@ -137,15 +162,18 @@ def transcribe_audio():
 
 
 SUPPORTED_LANGS = {
-    'en', 'hi', 'es', 'fr', 'de', 'ar', 'ja', 'zh-cn', 'auto',
-    'english', 'hindi', 'spanish', 'french', 'german', 'arabic', 'japanese', 'chinese'
+    'en', 'hi', 'es', 'fr', 'de', 'ar', 'ja', 'zh-cn', 'auto', 'ru', 'pt', 'it', 'ko', 'tr', 'bn', 'te', 'mr', 'ta', 'ur',
+    'english', 'hindi', 'spanish', 'french', 'german', 'arabic', 'japanese', 'chinese', 'russian', 'portuguese', 'italian', 'korean', 'turkish', 'bengali', 'telugu', 'marathi', 'tamil', 'urdu'
 }
 
 def validate_lang(lang: str) -> str:
     clean = lang.strip().lower()
-    if clean not in SUPPORTED_LANGS:
-        raise ValueError(f"Unsupported language: {lang}")
-    return clean
+    if clean in SUPPORTED_LANGS:
+        return clean
+    # Fallback: if it's a 2-letter code, it's likely supported by GoogleTranslator anyway
+    if len(clean) == 2:
+        return clean
+    raise ValueError(f"Unsupported language: {lang}")
 
 @voice_bp.route('/translate_vtt', methods=['POST'])
 @token_required
@@ -155,23 +183,71 @@ def translate_vtt_endpoint():
     source_lang = data.get('source_lang', 'auto')
     target_lang = data.get('target_lang', 'en')
 
+    if not vtt_text:
+        return jsonify({"translated_vtt": ""}), 200
+
     try:
-        src = 'auto' if source_lang.lower() == 'auto-detect' else validate_lang(source_lang)
+        src = 'auto' if source_lang.lower() in ['auto', 'auto-detect'] else validate_lang(source_lang)
         tgt = validate_lang(target_lang)
         
         translator = GoogleTranslator(source=src, target=tgt)
         
         lines = vtt_text.split('\n')
-        translated_lines = []
+        translated_lines = [None] * len(lines)
         
-        for line in lines:
-            if '-->' in line or line.startswith('WEBVTT') or line.strip() == '' or line.strip().isdigit():
-                translated_lines.append(line)
+        # Identify non-structural lines (text lines)
+        to_translate = []
+        for i, line in enumerate(lines):
+            is_structural = '-->' in line or line.startswith('WEBVTT') or line.strip() == '' or line.strip().isdigit()
+            if is_structural:
+                translated_lines[i] = line
             else:
-                translated = translator.translate(line)
-                translated_lines.append(translated if translated else line)
+                to_translate.append(i)
+
+        if not to_translate:
+            return jsonify({"translated_vtt": vtt_text}), 200
+
+        # Process in chunks of 50 lines to avoid Google Translate limits and maintain alignment
+        CHUNK_SIZE = 50
+        for i in range(0, len(to_translate), CHUNK_SIZE):
+            chunk_indices = to_translate[i:i+CHUNK_SIZE]
+            chunk_text_list = [lines[idx] for idx in chunk_indices]
+            
+            try:
+                # We join with a unique separator that Google Translate usually preserves
+                separator = " ___ "
+                batch_text = separator.join(chunk_text_list)
                 
-        return jsonify({"translated_vtt": "\n".join(translated_lines)}), 200
+                translated_batch = translator.translate(batch_text)
+                
+                if translated_batch:
+                    translated_parts = [p.strip() for p in translated_batch.split(separator)]
+                    
+                    # If line count matches, use translated parts
+                    if len(translated_parts) == len(chunk_indices):
+                        for j, part in enumerate(translated_parts):
+                            translated_lines[chunk_indices[j]] = part
+                    else:
+                        # Fallback: Translate individually for this chunk if counts don't match
+                        for idx in chunk_indices:
+                            try:
+                                translated_lines[idx] = translator.translate(lines[idx])
+                            except:
+                                translated_lines[idx] = lines[idx] # Keep original on failure
+                else:
+                    # Fallback to original text if translate returns None
+                    for idx in chunk_indices:
+                        translated_lines[idx] = lines[idx]
+            except Exception as chunk_err:
+                logger.warning(f"Batch translation failed for chunk {i}: {chunk_err}")
+                # Fallback to original for this chunk
+                for idx in chunk_indices:
+                    translated_lines[idx] = lines[idx]
+
+        # Fill any remaining None values just in case
+        final_lines = [l if l is not None else "" for l in translated_lines]
+                
+        return jsonify({"translated_vtt": "\n".join(final_lines)}), 200
     except Exception as e:
         logger.error(f"Translation Error: {e}")
         return jsonify({"error": f"Translation failed: {str(e)}"}), 500
@@ -228,11 +304,24 @@ def time_stretch(input_path, output_path, target_duration):
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+COQUI_LANG_MAP = {
+    'en': 'en', 'hi': 'hi', 'es': 'es', 'fr': 'fr', 'de': 'de', 'ar': 'ar', 'ja': 'ja', 'zh-cn': 'zh-cn', 'ru': 'ru', 'pt': 'pt', 'it': 'it', 'ko': 'ko', 'tr': 'tr',
+    'english': 'en', 'hindi': 'hi', 'spanish': 'es', 'french': 'fr', 'german': 'de',
+    'arabic': 'ar', 'japanese': 'ja', 'chinese': 'zh-cn', 'russian': 'ru',
+    'portuguese': 'pt', 'italian': 'it', 'korean': 'ko', 'turkish': 'tr',
+    'whisper ai': 'en', 'ai script': 'en', 'scripture': 'en', 'ai': 'en'
+}
+
 @voice_bp.route('/clone-voice', methods=['POST'])
 @token_required
 def clone_voice():
     text = request.form.get('text', '')
-    language = request.form.get('language', '')
+    raw_lang = request.form.get('language', 'en').strip().lower()
+    language = COQUI_LANG_MAP.get(raw_lang, raw_lang)
+    
+    # Final safety check: if it's still not a 2-letter code, default to 'en'
+    if len(language) > 5:
+        language = 'en'
     
     if 'speaker_wav' not in request.files:
         return jsonify({"error": "No speaker_wav file provided"}), 400

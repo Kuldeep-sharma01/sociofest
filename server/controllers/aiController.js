@@ -28,6 +28,84 @@ const fileToGenerativePart = async (filePath, mimeType) => {
   return { inlineData: { data, mimeType } };
 };
 
+/**
+ * Resolves a media URL (could be HLS or simple MP4) to a physical path on disk.
+ * If HLS is provided, it attempts to find the original MP4 fallback for AI processing.
+ */
+const resolveMediaSourcePath = (url) => {
+  if (!url) return null;
+  let cleanPath = url.replace(/\\/g, "/");
+  if (cleanPath.startsWith("http")) {
+    try {
+      const urlObj = new URL(url);
+      cleanPath = urlObj.pathname;
+    } catch (e) { }
+  }
+  if (cleanPath.startsWith("/")) cleanPath = cleanPath.substring(1);
+  
+  // Logic to swap HLS manifest for the source MP4 if it exists in the parent dir
+  if (cleanPath.includes("_hls/master.m3u8")) {
+    const mp4Path = cleanPath.replace(/_hls\/master\.m3u8$/, ".mp4");
+    if (fs.existsSync(path.resolve(process.cwd(), mp4Path))) {
+      cleanPath = mp4Path;
+    }
+  }
+  
+  return path.resolve(process.cwd(), cleanPath);
+};
+
+/**
+ * Updates or creates a _manifest.json for the media to include new sidecar files (subtitles/audio).
+ * This ensures "Detection" works on the frontend.
+ */
+const updateMediaManifest = async (sourceAudioUrl, newTrack) => {
+  if (!sourceAudioUrl) return;
+  try {
+    let cleanPath = sourceAudioUrl.replace(/\\/g, "/");
+    if (cleanPath.startsWith("http")) {
+      const urlObj = new URL(sourceAudioUrl);
+      cleanPath = urlObj.pathname;
+    }
+    if (cleanPath.startsWith("/")) cleanPath = cleanPath.substring(1);
+    
+    const fullSourcePath = path.resolve(process.cwd(), cleanPath);
+    const baseDir = path.dirname(fullSourcePath);
+    const extension = path.extname(fullSourcePath);
+    const baseName = path.basename(fullSourcePath, extension);
+    const manifestPath = path.join(baseDir, `${baseName}_manifest.json`);
+
+    let manifest = { subtitles: [], audioTracks: [] };
+    if (fs.existsSync(manifestPath)) {
+      const data = await fs.promises.readFile(manifestPath, "utf-8");
+      manifest = JSON.parse(data);
+    }
+
+    if (newTrack.type === 'subtitle') {
+      // Avoid duplicates
+      if (!manifest.subtitles.some(s => s.url === newTrack.url)) {
+        manifest.subtitles.push({
+          id: manifest.subtitles.length + 100, // Offset to avoid original track ID collisions
+          url: newTrack.url,
+          label: newTrack.label
+        });
+      }
+    } else if (newTrack.type === 'audio') {
+      if (!manifest.audioTracks.some(a => a.url === newTrack.url)) {
+        manifest.audioTracks.push({
+          id: manifest.audioTracks.length + 100,
+          url: newTrack.url,
+          label: newTrack.label
+        });
+      }
+    }
+
+    await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+    console.log(`[AI] Manifest updated for ${baseName}: Added ${newTrack.label}`);
+  } catch (err) {
+    console.warn("[AI] Failed to update manifest:", err.message);
+  }
+};
+
 // ✅ Add quota / entitlement checks at the start of each AI endpoint
 const AI_ALLOWED_ROLES = new Set(['Admin', 'Teacher', 'HOD', 'Student']);
 
@@ -102,13 +180,6 @@ export const generateContent = async (req, res) => {
     const safeSystem = SYSTEM_PROMPTS[contentType] || SYSTEM_PROMPTS.default;
 
     const genAI = getGenAI();
-    if (!genAI) {
-      return serverError(
-        res,
-        "AI Configuration Error: GEMINI_API_KEY is missing in the server environment.",
-      );
-    }
-
     let generatedText = "";
 
     switch (contentType) {
@@ -129,8 +200,9 @@ export const generateContent = async (req, res) => {
           }
         }
 
+        if (!genAI) return serverError(res, "AI Configuration Error: GEMINI_API_KEY is missing.");
         const chatModel = genAI.getGenerativeModel({
-          model: "gemini-1.5-flash",
+          model: "gemini-1.5-flash-latest",
           systemInstruction: safeSystem,
         });
         const formattedHistory = messages.slice(0, -1).map((msg) => ({
@@ -148,6 +220,7 @@ export const generateContent = async (req, res) => {
       case "quiz_generation":
       case "video_chapters":
       case "video_filter":
+        if (!genAI) return serverError(res, "AI Configuration Error: GEMINI_API_KEY is missing.");
         const jsonModel = genAI.getGenerativeModel({
           model: "gemini-1.5-flash",
           generationConfig: { responseMimeType: "application/json" },
@@ -156,8 +229,31 @@ export const generateContent = async (req, res) => {
         generatedText = jsonResult.response.text();
         break;
 
+      case "translation":
+        try {
+          if (!genAI) throw new Error("Gemini skipped (missing key)");
+          const transModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+          const transResult = await transModel.generateContent(prompt);
+          generatedText = transResult.response.text();
+        } catch (err) {
+          console.warn("Gemini Translation failed in generateContent, trying local fallback:", err.message);
+          const pythonUrl = process.env.PYTHON_INTERNAL_URL || process.env.PYTHON_URL || "http://localhost:5001";
+          const targetLangMatch = prompt.match(/to ([a-zA-Z]+)\./i);
+          const targetLang = targetLangMatch ? targetLangMatch[1].toLowerCase() : "en";
+          const response = await axios.post(`${pythonUrl}/voice-api/translate_vtt`, {
+            vtt_text: prompt.split('\n\n').slice(1).join('\n\n') || prompt,
+            source_lang: "auto",
+            target_lang: targetLang
+          }, {
+            headers: { 'Authorization': req.headers.authorization }
+          });
+          generatedText = response.data.translated_vtt;
+        }
+        break;
+
       default:
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        if (!genAI) return serverError(res, "AI Configuration Error: GEMINI_API_KEY is missing.");
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
         const result = await model.generateContent(prompt || messages[0].text);
         generatedText = result.response.text();
         break;
@@ -182,17 +278,9 @@ export const transcribeAudio = async (req, res) => {
 
 
     if (!filePathToTranscribe && req.body.sourceAudioUrl) {
-      let cleanPath = req.body.sourceAudioUrl.replace(/\\/g, "/");
-      if (cleanPath.startsWith("http")) {
-        try {
-          const urlObj = new URL(req.body.sourceAudioUrl);
-          cleanPath = urlObj.pathname;
-        } catch (e) { }
-      }
-      if (cleanPath.startsWith("/")) cleanPath = cleanPath.substring(1);
-      const fullSourcePath = path.resolve(process.cwd(), cleanPath);
-      if (fs.existsSync(fullSourcePath)) {
-        filePathToTranscribe = fullSourcePath;
+      const resolved = resolveMediaSourcePath(req.body.sourceAudioUrl);
+      if (resolved && fs.existsSync(resolved)) {
+        filePathToTranscribe = resolved;
       }
     }
 
@@ -223,7 +311,7 @@ export const transcribeAudio = async (req, res) => {
       throw new Error("File too large for Gemini inlineData API");
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
     const audioPart = await fileToGenerativePart(
       filePathToTranscribe,
       req.file?.mimetype || (filePathToTranscribe.endsWith(".mp4") ? "video/mp4" : "audio/mp3"),
@@ -234,7 +322,37 @@ export const transcribeAudio = async (req, res) => {
     ]);
 
     const text = result.response.text();
-    return ok(res, { text, vtt: `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\n${text}` }, "Audio transcribed via Gemini");
+    const vtt = `WEBVTT\n\n00:00:00.000 --> 00:00:05.000\n${text}`;
+
+    // --- PERSISTENCE & MANIFEST UPDATE ---
+    if (req.body.sourceAudioUrl) {
+      try {
+        const fullSourcePath = resolveMediaSourcePath(req.body.sourceAudioUrl);
+        if (fullSourcePath && fs.existsSync(fullSourcePath)) {
+          const baseDir = path.dirname(fullSourcePath);
+          const extension = path.extname(fullSourcePath);
+          const baseName = path.basename(fullSourcePath, extension);
+
+          const vttFileName = `${baseName}_transcription.vtt`;
+          const vttPath = path.join(baseDir, vttFileName);
+          await fs.promises.writeFile(vttPath, vtt);
+
+          const projectRoot = process.cwd();
+          const relativeDir = path.relative(projectRoot, baseDir);
+          const relativeVttUrl = `/${path.join(relativeDir, vttFileName).replace(/\\/g, "/")}`;
+          
+          await updateMediaManifest(req.body.sourceAudioUrl, {
+            type: 'subtitle',
+            url: relativeVttUrl,
+            label: "Transcription (AI)"
+          });
+        }
+      } catch (persistErr) {
+        console.warn("[AI] Failed to persist transcription:", persistErr.message);
+      }
+    }
+
+    return ok(res, { text, vtt }, "Audio transcribed via Gemini");
   } catch (error) {
     console.log(`Gemini transcription skipped/failed (${error.message}), trying local fallback...`);
     try {
@@ -248,7 +366,38 @@ export const transcribeAudio = async (req, res) => {
           'Authorization': req.headers.authorization
         }
       });
-      return ok(res, response.data, "Audio transcribed via local Whisper");
+
+      const data = response.data;
+
+      // --- PERSISTENCE & MANIFEST UPDATE FOR FALLBACK ---
+      if (req.body.sourceAudioUrl && data.vtt) {
+        try {
+          const fullSourcePath = resolveMediaSourcePath(req.body.sourceAudioUrl);
+          if (fullSourcePath && fs.existsSync(fullSourcePath)) {
+            const baseDir = path.dirname(fullSourcePath);
+            const extension = path.extname(fullSourcePath);
+            const baseName = path.basename(fullSourcePath, extension);
+
+            const vttFileName = `${baseName}_transcription_whisper.vtt`;
+            const vttPath = path.join(baseDir, vttFileName);
+            await fs.promises.writeFile(vttPath, data.vtt);
+
+            const projectRoot = process.cwd();
+            const relativeDir = path.relative(projectRoot, baseDir);
+            const relativeVttUrl = `/${path.join(relativeDir, vttFileName).replace(/\\/g, "/")}`;
+            
+            await updateMediaManifest(req.body.sourceAudioUrl, {
+              type: 'subtitle',
+              url: relativeVttUrl,
+              label: "Transcription (Whisper AI)"
+            });
+          }
+        } catch (persistErr) {
+          console.warn("[AI] Failed to persist Whisper transcription:", persistErr.message);
+        }
+      }
+
+      return ok(res, data, "Audio transcribed via local Whisper");
     } catch (localError) {
       console.error("Local Transcription Error:", localError.message);
       return serverError(res, localError.message);
@@ -338,39 +487,99 @@ export const translateMedia = async (req, res) => {
   try {
     const accessCheck = await assertAiAccess(req);
     if (accessCheck.error) return res.status(accessCheck.status).json({ message: accessCheck.message });
-    const { text, sourceLanguage, targetLanguage } = req.body;
+    const { text, sourceLanguage, targetLanguage, sourceAudioUrl } = req.body;
     if (!text) return badRequest(res, "Text is required for translation");
 
-    // ✅ Add length cap
-    const MAX_TRANSLATION_LENGTH = 5_000;
+    // ✅ Significantly increase length cap (5k was too small for videos > 5 mins)
+    const MAX_TRANSLATION_LENGTH = 50_000;
     if (text.length > MAX_TRANSLATION_LENGTH) {
       return badRequest(res, `Text too long for translation (max ${MAX_TRANSLATION_LENGTH} characters)`);
     }
 
     const genAI = getGenAI();
-    if (!genAI) {
-      return serverError(
-        res,
-        "AI Configuration Error: GEMINI_API_KEY is missing in the server environment.",
-      );
+    let translatedText = "";
+    let translatedVtt = "";
+    let method = "";
+
+    // If Gemini isn't configured, we skip to the fallback instead of erroring early
+    if (genAI) {
+      try {
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const prompt = `Translate the following text from ${normalizeLang(sourceLanguage)} to ${normalizeLang(targetLanguage)}:\n\n${text}\n\nMaintain the original tone and context. If this looks like a subtitle/VTT format, translate the dialogue but keep the timestamps exactly as they are.`;
+
+        const result = await model.generateContent(prompt);
+        translatedText = result.response.text();
+
+        // If the input was VTT, we return the translated VTT directly
+        const isVtt = text.includes("WEBVTT") || text.includes("-->");
+        translatedVtt = isVtt
+          ? translatedText
+          : `WEBVTT\n\n00:00:00.000 --> 00:10:00.000\n${translatedText}`;
+        method = "Gemini";
+      } catch (geminiError) {
+        console.warn("Gemini Translation failed, trying local fallback:", geminiError.message);
+      }
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const prompt = `Translate the following text from ${normalizeLang(sourceLanguage)} to ${normalizeLang(targetLanguage)}:\n\n${text}\n\nMaintain the original tone and context. If this looks like a subtitle/VTT format, translate the dialogue but keep the timestamps exactly as they are.`;
+    if (!translatedVtt) {
+      // Fallback to local Python translation service (GoogleTranslator based)
+      try {
+        const pythonUrl = process.env.PYTHON_INTERNAL_URL || process.env.PYTHON_URL || "http://localhost:5001";
+        const response = await axios.post(`${pythonUrl}/voice-api/translate_vtt`, {
+          vtt_text: text,
+          source_lang: normalizeLang(sourceLanguage),
+          target_lang: normalizeLang(targetLanguage)
+        }, {
+          headers: { 'Authorization': req.headers.authorization }
+        });
 
-    const result = await model.generateContent(prompt);
-    const translatedText = result.response.text();
+        translatedVtt = response.data.translated_vtt;
+        translatedText = translatedVtt
+          .split('\n')
+          .filter(l => !l.includes('-->') && !l.startsWith('WEBVTT') && l.trim() !== '' && !/^\d+$/.test(l))
+          .join(' ');
+        method = "Local Fallback";
+      } catch (localError) {
+        console.error("Translation Error (Local Fallback):", localError.message);
+        return serverError(res, localError.message);
+      }
+    }
 
-    // If the input was VTT, we return the translated VTT directly
-    const isVtt = text.includes("WEBVTT") || text.includes("-->");
-    const translatedVtt = isVtt
-      ? translatedText
-      : `WEBVTT\n\n00:00:00.000 --> 00:10:00.000\n${translatedText}`;
+    // --- PERSISTENCE & MANIFEST UPDATE ---
+    if (sourceAudioUrl && translatedVtt) {
+       try {
+          const fullSourcePath = resolveMediaSourcePath(sourceAudioUrl);
+          if (fullSourcePath && fs.existsSync(fullSourcePath)) {
+            const baseDir = path.dirname(fullSourcePath);
+            const extension = path.extname(fullSourcePath);
+            const baseName = path.basename(fullSourcePath, extension);
+          
+            const tLang = normalizeLang(targetLanguage);
+            const vttFileName = `${baseName}_translated_${tLang}.vtt`;
+            const vttPath = path.join(baseDir, vttFileName);
+            
+            await fs.promises.writeFile(vttPath, translatedVtt);
+            
+            // Derive relative URL from the fullSourcePath to maintain HLS dir structure if needed
+            const projectRoot = process.cwd();
+            const relativeDir = path.relative(projectRoot, baseDir);
+            const relativeVttUrl = `/${path.join(relativeDir, vttFileName).replace(/\\/g, "/")}`;
+            
+            await updateMediaManifest(sourceAudioUrl, {
+              type: 'subtitle',
+              url: relativeVttUrl,
+              label: `Scripture (${targetLanguage})` // Using user's terminology
+            });
+          }
+       } catch (persistErr) {
+          console.warn("[AI] Failed to persist translated VTT:", persistErr.message);
+       }
+    }
 
-    ok(
+    return ok(
       res,
       { translatedText, translatedVtt },
-      "Translation completed successfully. You can now edit the script before dubbing.",
+      `Translation completed successfully via ${method}.`,
     );
   } catch (error) {
     console.error("Translation Error:", error);
@@ -442,17 +651,9 @@ export const textToSpeech = async (req, res) => {
         }
       } else if (sourceAudioUrl) {
         // Automatically extract voice from the source video to clone!
-        let cleanPath = sourceAudioUrl.replace(/\\/g, "/");
-        if (cleanPath.startsWith("http")) {
-          try {
-            const urlObj = new URL(sourceAudioUrl);
-            cleanPath = urlObj.pathname;
-          } catch (e) { }
-        }
-        if (cleanPath.startsWith("/")) cleanPath = cleanPath.substring(1);
-        const fullSourcePath = path.resolve(process.cwd(), cleanPath);
+        const fullSourcePath = resolveMediaSourcePath(sourceAudioUrl);
 
-        if (fs.existsSync(fullSourcePath)) {
+        if (fullSourcePath && fs.existsSync(fullSourcePath)) {
           const os = await import("os");
           const { execFile } = await import("child_process");
           const util = await import("util");
@@ -497,15 +698,9 @@ export const textToSpeech = async (req, res) => {
     // --- POST-PROCESSING: Merge Background Sound ---
     if (mergeBackground && sourceAudioUrl) {
       try {
-        let cleanPath = sourceAudioUrl.replace(/\\/g, "/");
-        if (cleanPath.startsWith("http")) {
-          const urlObj = new URL(sourceAudioUrl);
-          cleanPath = urlObj.pathname;
-        }
-        if (cleanPath.startsWith("/")) cleanPath = cleanPath.substring(1);
-        const fullSourcePath = path.resolve(process.cwd(), cleanPath);
+        const fullSourcePath = resolveMediaSourcePath(sourceAudioUrl);
 
-        if (fs.existsSync(fullSourcePath)) {
+        if (fullSourcePath && fs.existsSync(fullSourcePath)) {
           const os = await import("os");
           const tempDubPath = path.join(os.tmpdir(), `dub_${uuidv4()}.wav`);
           const mergedPath = path.join(os.tmpdir(), `merged_${uuidv4()}.wav`);
@@ -523,6 +718,36 @@ export const textToSpeech = async (req, res) => {
       } catch (mergeErr) {
         console.warn("Background merging failed, returning clean dub:", mergeErr.message);
       }
+    }
+
+    // --- PERSISTENCE & MANIFEST UPDATE ---
+    if (sourceAudioUrl && audioBuffer) {
+       try {
+          const fullSourcePath = resolveMediaSourcePath(sourceAudioUrl);
+          if (fullSourcePath && fs.existsSync(fullSourcePath)) {
+            const baseDir = path.dirname(fullSourcePath);
+            const extension = path.extname(fullSourcePath);
+            const baseName = path.basename(fullSourcePath, extension);
+            
+            const tLang = normalizeLang(language);
+            const dubFileName = `${baseName}_dub_${tLang}.wav`;
+            const dubPath = path.join(baseDir, dubFileName);
+            
+            await fs.promises.writeFile(dubPath, audioBuffer);
+            
+            const projectRoot = process.cwd();
+            const relativeDir = path.relative(projectRoot, baseDir);
+            const relativeDubUrl = `/${path.join(relativeDir, dubFileName).replace(/\\/g, "/")}`;
+            
+            await updateMediaManifest(sourceAudioUrl, {
+              type: 'audio',
+              url: relativeDubUrl,
+              label: `AI Dub (${language})${mergeBackground ? " + Surround" : ""}`
+            });
+          }
+       } catch (persistErr) {
+          console.warn("[AI] Failed to persist dubbing audio:", persistErr.message);
+       }
     }
 
     res.setHeader("Content-Type", contentType);

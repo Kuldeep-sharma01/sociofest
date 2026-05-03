@@ -971,11 +971,14 @@ const masonryCols = "columns-1";
                             ? "nodownload"
                             : ""
                         }
-                        onContextMenu={(e) => e.preventDefault()}
+                        onContextMenu={(e) => {
+                          e.stopPropagation();
+                        }}
+                        onClick={(e) => e.stopPropagation()}
                         loop
                         playsInline
                         preload="metadata"
-                        className="w-full h-auto min-h-[200px] bg-black/5 rounded-lg object-contain shadow-inner transition-all duration-300"
+                        className="w-full h-auto min-h-[200px] bg-black/5 rounded-lg object-contain shadow-inner transition-all duration-300 relative z-[15] select-auto pointer-events-auto"
                       />
                     ) : media.type === "image" ? (
                       <img
@@ -1005,7 +1008,7 @@ const masonryCols = "columns-1";
                           e.stopPropagation();
                           toggleMediaDetails(mIdx);
                         }}
-                        className="bg-black/5 dark:bg-white/5 p-3 cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-all z-10 border-t border-inherit/10 text-inherit"
+                        className="bg-black/5 dark:bg-white/5 p-3 cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-all z-[5] border-t border-inherit/10 text-inherit relative"
                         title="Tap to hide details"
                         >
                           {media.title && (

@@ -134,7 +134,7 @@ const EventDetailsModal = ({
                       className="w-full h-full object-contain bg-black/10"
                     />
                     <div 
-                      className="absolute inset-0 z-10 cursor-pointer flex items-center justify-center bg-black/20 opacity-0 group-hover/eventvid:opacity-100 transition-opacity"
+                      className="absolute inset-0 z-10 cursor-pointer flex items-center justify-center bg-black/20 opacity-0 group-hover/eventvid:opacity-100 transition-opacity pointer-events-none group-hover/eventvid:pointer-events-auto"
                       onClick={() => setViewerFile({ url, type: "video", title: m.title || "Video" })}
                     >
                       <Video className="w-10 h-10 text-white drop-shadow-md" />
