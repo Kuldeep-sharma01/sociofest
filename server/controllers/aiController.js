@@ -15,6 +15,7 @@ import { runWithFallbackChain } from "../utils/aiProviderRouter.js";
 import { readSystemSettings } from "../utils/systemSettings.js";
 import { mergeAudioWithBackground } from "../utils/audioHelper.js";
 import { v4 as uuidv4 } from "uuid";
+import { storeAiMedia } from "../utils/mediaHelper.js";
 
 // Lazily load GenAI so missing production keys throw immediate 500s instead of falling back to test mocks
 const getGenAI = () => {
@@ -395,6 +396,9 @@ export const transcribeAudio = async (req, res) => {
         } catch (persistErr) {
           console.warn("[AI] Failed to persist Whisper transcription:", persistErr.message);
         }
+      } else if (data.vtt) {
+        // Persist orphaned transcription
+        await storeAiMedia(Buffer.from(data.vtt), "transcription.vtt", "text/vtt", req.user?._id).catch(() => {});
       }
 
       return ok(res, data, "Audio transcribed via local Whisper");
@@ -721,33 +725,42 @@ export const textToSpeech = async (req, res) => {
     }
 
     // --- PERSISTENCE & MANIFEST UPDATE ---
-    if (sourceAudioUrl && audioBuffer) {
-       try {
-          const fullSourcePath = resolveMediaSourcePath(sourceAudioUrl);
-          if (fullSourcePath && fs.existsSync(fullSourcePath)) {
-            const baseDir = path.dirname(fullSourcePath);
-            const extension = path.extname(fullSourcePath);
-            const baseName = path.basename(fullSourcePath, extension);
-            
-            const tLang = normalizeLang(language);
-            const dubFileName = `${baseName}_dub_${tLang}.wav`;
-            const dubPath = path.join(baseDir, dubFileName);
-            
-            await fs.promises.writeFile(dubPath, audioBuffer);
-            
-            const projectRoot = process.cwd();
-            const relativeDir = path.relative(projectRoot, baseDir);
-            const relativeDubUrl = `/${path.join(relativeDir, dubFileName).replace(/\\/g, "/")}`;
-            
-            await updateMediaManifest(sourceAudioUrl, {
-              type: 'audio',
-              url: relativeDubUrl,
-              label: `AI Dub (${language})${mergeBackground ? " + Surround" : ""}`
-            });
-          }
-       } catch (persistErr) {
-          console.warn("[AI] Failed to persist dubbing audio:", persistErr.message);
-       }
+    if (audioBuffer) {
+      if (sourceAudioUrl) {
+        try {
+           const fullSourcePath = resolveMediaSourcePath(sourceAudioUrl);
+           if (fullSourcePath && fs.existsSync(fullSourcePath)) {
+             const baseDir = path.dirname(fullSourcePath);
+             const extension = path.extname(fullSourcePath);
+             const baseName = path.basename(fullSourcePath, extension);
+             
+             const tLang = normalizeLang(language);
+             const dubFileName = `${baseName}_dub_${tLang}.wav`;
+             const dubPath = path.join(baseDir, dubFileName);
+             
+             await fs.promises.writeFile(dubPath, audioBuffer);
+             
+             const projectRoot = process.cwd();
+             const relativeDir = path.relative(projectRoot, baseDir);
+             const relativeDubUrl = `/${path.join(relativeDir, dubFileName).replace(/\\/g, "/")}`;
+             
+             await updateMediaManifest(sourceAudioUrl, {
+               type: 'audio',
+               url: relativeDubUrl,
+               label: `AI Dub (${language})${mergeBackground ? " + Surround" : ""}`
+             });
+           }
+        } catch (persistErr) {
+           console.warn("[AI] Failed to persist dubbing audio:", persistErr.message);
+        }
+      } else {
+        // Persist orphaned/cloned audio for tracking and future cloud sync
+        const mediaDoc = await storeAiMedia(audioBuffer, "cloned_voice.wav", contentType, req.user?._id).catch(() => null);
+        if (mediaDoc) {
+          res.setHeader("X-Media-ID", mediaDoc._id.toString());
+          res.setHeader("X-Media-Path", mediaDoc.path);
+        }
+      }
     }
 
     res.setHeader("Content-Type", contentType);

@@ -352,7 +352,8 @@ async def clone_voice(
         with open(temp_wav_path, "wb") as buffer:
             shutil.copyfileobj(speaker_wav.file, buffer)
 
-        output_path = f"cloned_output_{uuid.uuid4().hex}.wav"
+        output_filename = f"cloned_{uuid.uuid4().hex}.wav"
+        output_path = os.path.join(temp_dir, output_filename)
         is_vtt = "WEBVTT" in text or "-->" in text
         
         tts_model = get_tts()
@@ -400,7 +401,6 @@ async def clone_voice(
                 finally:
                     shutil.rmtree(temp_dir_vtt, ignore_errors=True)
                     
-        background_tasks.add_task(cleanup_file, output_path)
         return FileResponse(output_path, media_type="audio/wav", filename="cloned_voice.wav")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI generation failed: {str(e)}")

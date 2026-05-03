@@ -343,7 +343,8 @@ def clone_voice():
     try:
         speaker_wav.save(temp_wav_path)
 
-        output_path = f"cloned_output_{uuid.uuid4().hex}.wav"
+        output_filename = f"cloned_{uuid.uuid4().hex}.wav"
+        output_path = os.path.join(temp_dir, output_filename)
         is_vtt = "WEBVTT" in text or "-->" in text
         
         tts_model = get_tts()
@@ -389,18 +390,11 @@ def clone_voice():
                 finally:
                     shutil.rmtree(temp_dir_vtt, ignore_errors=True)
                     
-        @after_this_request
-        def remove_file(response):
-            try:
-                os.remove(output_path)
-            except Exception as e:
-                logger.error(f"Error removing output file: {e}")
-            return response
-
         return send_file(output_path, mimetype="audio/wav", as_attachment=True, download_name="cloned_voice.wav")
         
     except Exception as e:
         logger.error(f"AI generation failed: {e}")
         return jsonify({"error": f"AI generation failed: {str(e)}"}), 500
     finally:
+        # Note: temp_dir cleanup handles output_path since it's now inside temp_dir
         shutil.rmtree(temp_dir, ignore_errors=True)

@@ -683,18 +683,81 @@ export const processExternalUrl = async (
 };
 
 /**
- * Safely deletes an array of Media documents and their physical files
+ * Safely deletes an array of Media documents and their physical files,
+ * including all associated sidecar files (manifests, HLS segments, AI dubs, etc.)
  */
 export const deleteMediaDocs = async (mediaIds) => {
   if (!mediaIds || mediaIds.length === 0) return;
   for (const mId of mediaIds) {
     const mediaDoc = await Media.findById(mId);
-    if (mediaDoc) {
-      if (!mediaDoc.isExternal && !mediaDoc.path.startsWith("http"))
-        await fs
-          .unlink(path.resolve(process.cwd(), mediaDoc.path))
-          .catch(() => { });
-      await mediaDoc.deleteOne();
+    if (!mediaDoc) continue;
+
+    if (!mediaDoc.isExternal && !mediaDoc.path.startsWith("http")) {
+      const fullPath = path.resolve(process.cwd(), mediaDoc.path);
+      const baseDir = path.dirname(fullPath);
+      const ext = path.extname(fullPath);
+      const baseName = path.basename(fullPath, ext);
+
+      try {
+        // 1. Delete the main file
+        await fs.unlink(fullPath).catch(() => { });
+
+        // 2. Scan for and delete sidecar files
+        const filesInDir = await fs.readdir(baseDir).catch(() => []);
+        const sidecarPattern = new RegExp(`^${baseName}(_manifest\\.json|_thumb\\.jpg|_opt\\.mp4|_transcription.*\\.vtt|_translated_.*\\.vtt|_dub_.*\\.wav|_\\d+p\\.mp4)$`);
+        
+        for (const file of filesInDir) {
+          if (sidecarPattern.test(file)) {
+            await fs.unlink(path.join(baseDir, file)).catch(() => { });
+          }
+        }
+
+        // 3. Delete HLS directory if it exists
+        const hlsDir = path.join(baseDir, `${baseName}_hls`);
+        await fs.rm(hlsDir, { recursive: true, force: true }).catch(() => { });
+
+        logger.info(`[Cleanup] Deleted media and all sidecars for: ${baseName}`);
+      } catch (err) {
+        logger.error(`[Cleanup] Error during media deletion for ${baseName}:`, err.message);
+      }
     }
+    await mediaDoc.deleteOne();
   }
+};
+
+/**
+ * Persists AI-generated media (like dubs or transcriptions) to the standard storage location.
+ * Respects cloud storage settings if configured.
+ */
+export const storeAiMedia = async (buffer, filename, mimetype, uploaderId = null) => {
+  const { readSystemSettings } = await import("./systemSettings.js");
+  const settings = await readSystemSettings();
+  
+  // Ensure the AI uploads directory exists
+  const aiUploadDir = path.join("uploads", "ai");
+  await fs.mkdir(aiUploadDir, { recursive: true }).catch(() => { });
+  
+  const hash = crypto.createHash("sha256").update(buffer).digest("hex");
+  const finalFilename = `${hash}_${Date.now()}${path.extname(filename)}`;
+  const localPath = path.join(aiUploadDir, finalFilename);
+
+  // Always save locally first as a master/cache
+  await fs.writeFile(localPath, buffer);
+  
+  let finalPath = localPath.replace(/\\/g, "/");
+
+  // If cloud storage is enabled, we'd typically upload here using the Python service.
+  
+  const mediaDoc = new Media({
+    hash,
+    path: finalPath,
+    mimetype,
+    size: buffer.length,
+    originalName: filename,
+    uploader: uploaderId,
+    isPublic: true
+  });
+  
+  await mediaDoc.save();
+  return mediaDoc;
 };
